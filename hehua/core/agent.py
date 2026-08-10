@@ -149,8 +149,8 @@ def _nuclei_prescan(ch: dict, addrs: list, events) -> str | None:
     events.log('prescan_empty', code=code, rc=getattr(p, 'returncode', -1), err=(p.stderr or '')[:120])
     return None
 
-def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient, notes: Notes, submit_fn, events, workdir: Path, budget_min: float=8.0, hint: str | None=None, intel: str | None=None, send_thinking: bool=True, self_assess: bool=False, stop_event=None, direction: str | None=None, dead_ends: list | None=None) -> Outcome:
-    system = (PROMPTS_DIR / 'system.md').read_text(encoding='utf-8')
+def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient, notes: Notes, submit_fn, events, workdir: Path, budget_min: float=8.0, hint: str | None=None, intel: str | None=None, send_thinking: bool=True, self_assess: bool=False, stop_event=None, direction: str | None=None, dead_ends: list | None=None, system_name: str='system.md') -> Outcome:
+    system = (PROMPTS_DIR / system_name).read_text(encoding='utf-8')
     pb = pick_playbook(ch.get('description', ''), ch.get('unique_code', ''))
     system += '\n\n---\n' + (PROMPTS_DIR / pb).read_text(encoding='utf-8')
     tctx = ToolContext(workdir=workdir, notes=notes, submit_fn=submit_fn, addrs=addrs)

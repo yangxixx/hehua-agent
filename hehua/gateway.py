@@ -18,7 +18,7 @@ def rewrite_for_gateway(base_url: str) -> str:
         stripped = host[:-len(GATEWAY_SUFFIX)]
         if is_whitelisted(stripped):
             return base_url
-        raise ValueError(f'domain not in the platform LLM whitelist: {stripped}')
+        raise ValueError(f'domain not in Tsecbench LLM whitelist: {stripped}')
     if not is_whitelisted(host):
-        raise ValueError(f'domain not in the platform LLM whitelist: {host}')
+        raise ValueError(f'domain not in Tsecbench LLM whitelist: {host}')
     return urlunparse(('http', host + GATEWAY_SUFFIX, u.path or '', '', '', ''))

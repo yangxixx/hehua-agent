@@ -9,8 +9,3 @@ reports/
 logs/
 .pytest_cache/
 *.egg-info/
-state_smoke/
-logs_smoke/
-out_smoke/
-reports/
-__pycache__/

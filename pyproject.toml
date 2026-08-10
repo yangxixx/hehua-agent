@@ -1,11 +1,10 @@
 [project]
 name = "hehua"
 version = "0.1.0"
-description = "Autonomous offensive-security (pentest) agent: LLM tool-use loop + deterministic orchestration"
+description = "Autonomous offensive-security agent: point at a target, it pentests."
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.27",
-    "tsec-benchmark>=0.1.2",
 ]
 
 [project.optional-dependencies]
@@ -17,4 +16,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["hehua"]
-
