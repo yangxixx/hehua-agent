@@ -1,1 +1,1 @@
-"""Metrics: event log + BSRC-facing report."""
+"""Metrics: event log + report."""

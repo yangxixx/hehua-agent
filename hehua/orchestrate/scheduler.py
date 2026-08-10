@@ -2,7 +2,7 @@
 per-class budgets, R2 second-pass queue.
 
 Calibration source: docs/leaderboard-intel.md (65 public eval runs).
-Challenge codes on Tsecbench v1 use dimension prefixes:
+Challenge codes on the platform use dimension prefixes:
   a- Web(18)  b- killchain(3, multi-flag)  c- exploit(9)  d- cloud(6)
   e1/e2/e3- evasion(14)  f1/f2- binary(13)
 Observed ROI (flags-per-minute across top agents) drives priority:
@@ -22,7 +22,7 @@ PRIOR = {"e1": 0.95, "e2": 0.95, "e3": 0.90, "d": 0.85, "f1": 1.00,
 # classes where a second attempt is allowed unconditionally (high prior);
 # others retry only with recorded progress (round-0 postmortem: hard-a
 # retries burned 111min and starved c/f2 entirely).
-# run-6661 lesson: c- classes carry the HIGHEST final-score value per flag
+# prior-run lesson: c- classes carry the HIGHEST final-score value per flag
 # (15% weight on the smallest dim base ≈ 3.75 final pts per 500-pt flag),
 # yet c-04 died once at 5.6min with 0 facts and never retried. c- retries
 # are now unconditional; the gate below still protects a-/b- budgets.

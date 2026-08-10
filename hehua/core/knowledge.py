@@ -1,6 +1,6 @@
-"""Cross-challenge recipe knowledge base (SlopperCore's signature pattern).
+"""Cross-challenge recipe knowledge base (a top agent's signature pattern).
 
-SlopperCore (榜一, pure flash, 86.19) reuses prior solves: when attacking a
+a top agent  reuses prior solves: when attacking a
 challenge it reads scripts/flags from already-solved SIBLINGS
 (/workspace/runtime/<code>/solve/...). We mirror that with a shared
 knowledge.jsonl in the workroot: every solved challenge writes a short recipe

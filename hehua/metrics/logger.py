@@ -1,4 +1,4 @@
-"""Append-only JSONL event log (replayable transcripts for BSRC writeups)."""
+"""Append-only JSONL event log (replayable transcripts for writeups)."""
 from __future__ import annotations
 
 import json

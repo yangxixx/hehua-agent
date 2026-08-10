@@ -20,8 +20,8 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 def pick_playbook(description: str, code: str = "") -> str:
     """Choose the playbook for a challenge.
 
-    Tsecbench v1 taxonomy is encoded in the challenge-code prefix — it is
-    AUTHORITATIVE (run-6661 audit: keyword matching gave ALL 9 c- challenges
+    the platform taxonomy is encoded in the challenge-code prefix — it is
+    AUTHORITATIVE (prior-run audit: keyword matching gave ALL 9 c- challenges
     the web playbook, so the product-recipe table never reached them; b-01/
     b-02 and most f1/e-series were misrouted too). Keywords remain only as
     a fallback for non-platform challenge sets (XBOW local practice)."""
@@ -116,7 +116,7 @@ _PRODUCT_HINTS = ("1panel", "泛微", "weaver", "seeyon", "用友", "yonyou", "�
 def _wait_targets_ready(addrs: list, events, grace_sec: float = 90.0) -> None:
     """TCP-probe target ports until one answers or the grace window expires.
 
-    run-6661 c-04 regression: Java-based containers (GeoServer/Langflow...)
+    prior-run c-04 regression: Java-based containers (GeoServer/Langflow...)
     take 30-90s to boot; the agent saw connection-refused and gave up inside
     6 minutes with zero facts — which also locked the retry gate. Waiting
     here costs nothing (it happens before the per-challenge clock starts)."""
@@ -230,7 +230,7 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
         challenge_msg += (f"\n\nOFFICIAL HINT (score for this challenge is "
                           f"discounted):\n{hint}")
     # boot grace BEFORE prescan + clock: scanning a still-booting container
-    # wastes the prescan window and misses every hit (run-6661 c-series)
+    # wastes the prescan window and misses every hit (prior-run c-series)
     _wait_targets_ready(addrs, events)
     tctx.start_ts = time.time()  # finish-guard clock = actual work clock
     prescan = _nuclei_prescan(ch, addrs, events)
@@ -242,7 +242,7 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
         challenge_msg += ("\n\nPREVIOUS ATTEMPT INTELLIGENCE (your prior self "
                           "died one step short — start FROM these leads, do "
                           "not re-derive):\n" + intel)
-    # Cross-challenge knowledge (SlopperCore pattern): seed with PROVEN recipes
+    # Cross-challenge knowledge (cross-challenge reuse pattern): seed with PROVEN recipes
     # from already-solved sibling challenges in the same family — a working PoC
     # for c-02 is a head-start for c-03. Best-effort; never block a solve on it.
     try:
@@ -290,7 +290,7 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
             if self_assess and not assessed:
                 # At the limit, let the (strong) model judge for itself: is a
                 # concrete path to the flag in reach? Grant ONE extension and
-                # leave the continue-vs-finish call to it (run-xben directive).
+                # leave the continue-vs-finish call to it (prior-run directive).
                 assessed = True
                 grant = min(600.0, hard_sec * 0.5)
                 hard_sec += grant
@@ -354,7 +354,7 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
         events.log("llm_call", model=res.model, usage=res.usage,
                    tool_calls=[c.name for c in res.tool_calls])
         if not res.tool_calls:
-            # run-6661: 149 "tool calls only" injections — agents that keep
+            # prior-run: 149 "tool calls only" injections — agents that keep
             # narrating instead of acting burn full-context LLM calls until
             # the budget bleeds out. Three refusals in a row = forced stop
             # (notes survive for the retry pass).

@@ -193,7 +193,7 @@ def build_tools(ctx: ToolContext, cfg) -> dict:
                     "/var/www /tmp 2>/dev/null`, check `env` and other "
                     "routes/roles/params, and submit_flag any suspects. Then call "
                     "finish again.")
-        # run-6661 c-04 lesson: giving up at 5.6min with zero facts on a
+        # prior-run c-04 lesson: giving up at 5.6min with zero facts on a
         # still-booting target burned the attempt AND locked the retry gate
         # (no progress recorded). Block early give-ups that learned nothing;
         # a finish backed by facts or submits is always honored.

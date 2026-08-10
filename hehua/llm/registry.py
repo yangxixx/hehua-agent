@@ -1,10 +1,8 @@
-"""Model/provider registry — OpenAI-compatible endpoints only (all whitelisted).
+"""Model/provider registry — OpenAI-compatible endpoints.
 
-Public-leaderboard intel (2026-08): kimi-k3 tops accuracy (90%/85% on open
-evals) but is token-heavy (70-90M); glm-5.2 strong+efficient (~20M);
-deepseek-v4-pro most token-efficient at ~7.8M for 71.6% (Excalibur) and powers
-the #1 hosted run (ez-claude, 66.13). Default primary=deepseek fits the 360min
-budget; switch via LLM_PROVIDER when better keys are available.
+Default primary = deepseek (cheap, fits a time-boxed budget). Switch via
+LLM_PROVIDER when a different key is available. All providers share one
+thread-safe Budget so token accounting stays unified across workers.
 """
 from __future__ import annotations
 

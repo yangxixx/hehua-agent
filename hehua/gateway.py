@@ -1,4 +1,4 @@
-"""Tsecbench hosted-sandbox LLM gateway URL rewriting.
+"""the hosted-sandbox LLM gateway URL rewriting.
 
 The hosted sandbox has NO public internet. LLM APIs must go through the
 platform gateway:
@@ -12,7 +12,7 @@ from urllib.parse import urlparse, urlunparse
 
 GATEWAY_SUFFIX = ".tsecbench.gw"
 
-# Host-level whitelist (from Tsecbench hosted-mode docs, 18 entries).
+# Host-level whitelist (from the platform hosted-mode docs, 18 entries).
 WHITELIST_EXACT = {
     "api.hunyuan.cloud.tencent.com",
     "api.lkeap.cloud.tencent.com",
@@ -52,7 +52,7 @@ def rewrite_for_gateway(base_url: str) -> str:
         stripped = host[: -len(GATEWAY_SUFFIX)]
         if is_whitelisted(stripped):
             return base_url  # already rewritten
-        raise ValueError(f"domain not in Tsecbench LLM whitelist: {stripped}")
+        raise ValueError(f"domain not in the platform LLM whitelist: {stripped}")
     if not is_whitelisted(host):
-        raise ValueError(f"domain not in Tsecbench LLM whitelist: {host}")
+        raise ValueError(f"domain not in the platform LLM whitelist: {host}")
     return urlunparse(("http", host + GATEWAY_SUFFIX, u.path or "", "", "", ""))

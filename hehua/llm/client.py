@@ -141,7 +141,7 @@ class LLMClient:
                     raise QuotaExhausted(
                         f"{provider.name} balance exhausted: {body[:120]}")
                 # quota/rate limit: wait it out patiently, don't burn the
-                # general attempt budget (run-xben GLM escalation lesson)
+                # general attempt budget (prior-run GLM escalation lesson)
                 rate_limited += 1
                 if rate_limited > _RATE_LIMIT_MAX:
                     raise RuntimeError(

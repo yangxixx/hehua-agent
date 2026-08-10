@@ -1,4 +1,4 @@
-"""Generate the BSRC-facing metrics report (量化指标 vs 传统模式)."""
+"""Generate the metrics report (量化指标 vs 传统模式)."""
 from __future__ import annotations
 
 import json

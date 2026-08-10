@@ -26,7 +26,7 @@ def compact(messages: list[dict], llm: LLMClient, prompt: str,
     (the nuclei hit, the RCE response, the flag) survives compaction, not just a
     lossy summary. Only the exploratory dead-ends in between get summarized.
 
-    run-6661 lesson (a-14 amnesia loop): the durable notes snapshot is force-fed
+    prior-run lesson (a-14 amnesia loop): the durable notes snapshot is force-fed
     to the summarizer AND re-anchored after compaction (see agent.py)."""
     if len(messages) <= keep_tail + 2:
         return messages

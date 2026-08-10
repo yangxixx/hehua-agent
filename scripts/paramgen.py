@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate combined API parameter-name candidates (run-6661 a-14 lesson).
+"""Generate combined API parameter-name candidates (prior-run a-14 lesson).
 
 The a-14 SSRF parameter was `target_endpoint` — a prefix+noun COMPOUND.
 One-word dictionaries never try it, so the agent burned 132 min. This tool

@@ -40,7 +40,7 @@ if s.check() == sat:
    Interactive one-off probes are for understanding the protocol ONLY;
    the exploit hunt itself must be script-driven.
 7. Length sweeps go SMALL FIRST: 8/16/32/64/128/256/512/1024 BEFORE 4096+.
-   Off-by-one and heap bugs live at small struct/buffer sizes (run-6661
+   Off-by-one and heap bugs live at small struct/buffer sizes (prior-run
    f1-01: the bug was a 64-byte token buffer; the hunt fixated on the 4096
    line buffer and died). For every N where behavior changes, also test
    exactly N, N-1, N+1 with a trailing NUL/newline variant.

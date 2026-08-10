@@ -1,4 +1,4 @@
-"""Token/cost accounting per model (feeds BSRC metrics: 大模型运行成本)."""
+"""Token/cost accounting per model (feeds metrics: 大模型运行成本)."""
 from __future__ import annotations
 
 import threading
