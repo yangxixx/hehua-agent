@@ -79,6 +79,7 @@ scripts/    scan / crawl / dirfuzz / paramgen
 ## 合规
 
 **仅在授权靶场 / SRC 范围内运行。** 密钥全部走环境变量。
+<img width="1320" height="960" alt="image" src="https://github.com/user-attachments/assets/44aaed6d-dbee-4df3-bd1c-b75a8141081e" />
 
 ## License
 
