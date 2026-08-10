@@ -104,8 +104,9 @@ def main(argv=None) -> int:
         else:
             pentest_target(t, cfg, llm, 'out', budget=args.budget, instruction=args.instruction, llm_glm=llm_glm, deep=deep, peers=peers)
         return 0
+    from .operator import operator_repl
     budget = float(os.getenv('HEHUA_PENTEST_BUDGET', '30'))
-    repl(cfg, llm, 'out', llm_glm=llm_glm, budget=budget, deep=os.getenv('HEHUA_DEEP', '') in ('deep', '1', 'on', 'yes'), peers=peers)
+    operator_repl(cfg, llm, llm_glm=llm_glm, workroot='out', budget=budget, deep=os.getenv('HEHUA_DEEP', '') in ('deep', '1', 'on', 'yes'), peers=peers)
     return 0
 
 def _run_with(cfg, platform, llm, events, state, workdir):
