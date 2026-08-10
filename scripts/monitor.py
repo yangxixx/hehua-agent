@@ -14,6 +14,14 @@ for line in open(path, encoding="utf-8"):
         except json.JSONDecodeError:
             pass
 
+# scope to the CURRENT run: keep only events from the last run_start onward
+last_start = -1
+for i, e in enumerate(events):
+    if e.get("type") == "run_start":
+        last_start = i
+if last_start >= 0:
+    events = events[last_start:]
+
 solved, failed, partial = set(), set(), set()
 flags_correct = 0
 submits = 0
@@ -50,12 +58,19 @@ for e in events:
     elif t in ("solve_error", "worker_error", "task_ended", "prescan_error"):
         errors.append(e)
 
+escalated = [e.get("code") for e in events if e.get("type") == "escalated"]
+glm_starts = [e.get("code") for e in events
+              if e.get("type") == "challenge_start" and e.get("phase") == "GLM"]
+glm_solved = [e.get("code") for e in events
+              if e.get("type") == "challenge_end" and e.get("status") == "solved"
+              and e.get("code") in set(glm_starts)]
 print(f"last event ts : {last_ts}")
 print(f"solved   : {len(solved)}")
 print(f"partial  : {len(partial)}  {sorted(partial)[:8]}")
 print(f"failed   : {len(failed)}")
 print(f"flags    : {flags_correct} correct / {submits} submits ({wrong} wrong)")
 print(f"attempts : {sum(starts.values())} starts across {len(starts)} challenges")
+print(f"escalated: {len(escalated)} to GLM | GLM attempts: {len(glm_starts)} | GLM solved: {len(set(glm_solved))} {sorted(set(glm_solved))[:6]}")
 print(f"llm calls: {llm_calls}   tokens: {tokens:,}")
 if errors:
     print(f"ERRORS ({len(errors)}):")

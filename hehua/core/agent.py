@@ -10,6 +10,7 @@ from pathlib import Path
 from ..config import Config
 from ..llm.client import LLMClient
 from . import context as ctxmod
+from .knowledge import Knowledge, family_of
 from .memory import Notes
 from .tools import ToolContext, build_schemas, build_tools
 
@@ -37,7 +38,21 @@ def pick_playbook(description: str, code: str = "") -> str:
         return "playbook_binary.md"
     if pre.startswith(("a-", "a0")):
         return "playbook_web.md"
+    # 8/16 new dimensions (prefix scheme unknown pre-competition) — best-effort
+    # prefix guesses, then keyword fallback. Distinctive terms, checked first.
+    if pre.startswith(("ai-", "llm-", "gpt-", "bot-")):
+        return "playbook_ai.md"
+    if pre.startswith(("bc-", "chain-", "eth-", "sol-", "block-")):
+        return "playbook_blockchain.md"
     d = (description or "").lower()
+    if any(k in d for k in ("区块链", "智能合约", "合约", "solidity", "以太坊",
+                             "ethereum", "web3", "链上", "代币", "dao", "reentrancy",
+                             "blockchain", "erc20", "erc-20")):
+        return "playbook_blockchain.md"
+    if any(k in d for k in ("大模型", "llm", "提示注入", "prompt injection", "ai agent",
+                             "智能体", "chatbot", "聊天机器人", "rag", "langchain",
+                             "function calling", "mcp", "jailbreak", "越狱")):
+        return "playbook_ai.md"
     if any(k in d for k in ("内网", "横向", "域", "killchain", "多阶段", "pivot")):
         return "playbook_killchain.md"
     if any(k in d for k in ("二进制", "pwn", "逆向", "reverse", "rop", "binary")):
@@ -190,7 +205,11 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
                     notes: Notes, submit_fn, events, workdir: Path,
                     budget_min: float = 8.0, hint: str | None = None,
                     intel: str | None = None,
-                    send_thinking: bool = True) -> Outcome:
+                    send_thinking: bool = True,
+                    self_assess: bool = False,
+                    stop_event=None,
+                    direction: str | None = None,
+                    dead_ends: list | None = None) -> Outcome:
     system = (PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
     pb = pick_playbook(ch.get("description", ""), ch.get("unique_code", ""))
     system += "\n\n---\n" + (PROMPTS_DIR / pb).read_text(encoding="utf-8")
@@ -223,6 +242,30 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
         challenge_msg += ("\n\nPREVIOUS ATTEMPT INTELLIGENCE (your prior self "
                           "died one step short — start FROM these leads, do "
                           "not re-derive):\n" + intel)
+    # Cross-challenge knowledge (SlopperCore pattern): seed with PROVEN recipes
+    # from already-solved sibling challenges in the same family — a working PoC
+    # for c-02 is a head-start for c-03. Best-effort; never block a solve on it.
+    try:
+        kint = Knowledge(workdir.parent / "knowledge.jsonl").intel_block(
+            family_of(ch.get("unique_code", "")))
+        if kint:
+            challenge_msg += ("\n\nPRIOR SOLVES in this challenge family — these "
+                              "approaches ALREADY WORKED on siblings; if the same "
+                              "product/pattern appears, reuse the exact payload "
+                              "instead of re-deriving:\n" + kint)
+    except Exception:  # noqa: BLE001
+        pass
+    if direction:
+        challenge_msg += (f"\n\nDEEP-MODE PEER ASSIGNMENT: you are one of several agents "
+                          f"attacking this SAME target in PARALLEL. Your assigned focus: "
+                          f"**{direction}**. Another peer covers a different angle — do NOT "
+                          f"duplicate; share every finding immediately via notes(kind=fact), "
+                          f"and if you reach the flag submit_flag at once.")
+    if dead_ends:
+        challenge_msg += ("\n\nDEAD ENDS — these EXACT approaches were already tried "
+                          "and FAILED (by a prior attempt or a sibling peer). Do NOT "
+                          "repeat them; pick a different angle:\n- "
+                          + "\n- ".join(str(d)[:160] for d in dead_ends[:8]))
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": challenge_msg}]
 
@@ -236,11 +279,33 @@ def solve_challenge(ch: dict, addrs: list, cfg: Config, llm: LLMClient,
     hard_q = (ch.get("difficulty") or "").lower() == "hard"
     think_mode = cfg.thinking
     extended = False
+    assessed = False  # one-shot self-assessment extension (GLM escalation)
 
     while not tctx.finished and steps < cfg.max_steps:
+        # deep-mode peers bail the moment a sibling peer submits the flag
+        if stop_event is not None and stop_event.is_set():
+            break
         elapsed = time.time() - start
         if elapsed >= hard_sec:
-            break
+            if self_assess and not assessed:
+                # At the limit, let the (strong) model judge for itself: is a
+                # concrete path to the flag in reach? Grant ONE extension and
+                # leave the continue-vs-finish call to it (run-xben directive).
+                assessed = True
+                grant = min(600.0, hard_sec * 0.5)
+                hard_sec += grant
+                events.log("self_assess_grant", code=ch.get("unique_code"),
+                           extra_min=round(grant / 60, 1))
+                messages.append({"role": "user", "content":
+                    "[budget] You have hit this challenge's time limit. Before "
+                    "we cut you off, self-assess HONESTLY: do you have a "
+                    "CONCRETE, executable path to the flag (not a hunch)? If "
+                    "YES, keep working — you are granted a short final "
+                    "extension — and execute that path NOW. If you have no real "
+                    "path, call finish(give_up) immediately and record what you "
+                    "learned as notes(failure) for future attempts."})
+            else:
+                break
         if not soft_warned and elapsed >= soft_sec:
             soft_warned = True
             # kill-chain-detected extension: if leads are hot, buy +25% time

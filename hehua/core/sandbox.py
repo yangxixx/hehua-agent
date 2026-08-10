@@ -33,7 +33,8 @@ def run_bash(command: str, workdir: str | Path, timeout: int = 120,
             p = subprocess.Popen(
                 argv if argv else command,
                 shell=argv is None, cwd=workdir, stdout=f, stderr=f,
-                stdin=subprocess.DEVNULL, env=env)
+                stdin=subprocess.DEVNULL, env=env,
+                start_new_session=True)   # own process group -> killpg reaches grandchildren
             try:
                 code = p.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -51,12 +52,23 @@ def run_bash(command: str, workdir: str | Path, timeout: int = 120,
 
 
 def _kill_tree(pid: int) -> None:
+    """Kill the process AND all descendants. On Linux a bare os.kill(pid,9)
+    orphans grandchildren (e.g. a `for port in 1..65535` bash scan reparents
+    its 100 background jobs to init, which then run for hours and wedge the
+    agent). start_new_session=True gives the child its own group, so killpg
+    reaps the whole tree. """
     try:
         if os.name == "nt":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                            capture_output=True, timeout=10)
         else:
-            os.kill(pid, 9)
+            try:
+                os.killpg(os.getpgid(pid), 9)   # whole session/group
+            except ProcessLookupError:
+                pass
+            else:
+                return
+            os.kill(pid, 9)                      # fallback: just the leader
     except OSError:
         pass
 

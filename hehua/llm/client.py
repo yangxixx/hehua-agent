@@ -22,6 +22,15 @@ class ContextOverflow(Exception):
     """Provider rejected the prompt as too long -> caller should compact."""
 
 
+class QuotaExhausted(Exception):
+    """Provider balance/quota exhausted (GLM code 1113 "余额不足").
+
+    NOT a transient rate limit — retrying just burns ~5 min/challenge for
+    nothing. Raised fast so the escalation circuit-breaker (runner) can
+    disable GLM for the rest of the run and let flash keep working.
+    """
+
+
 class LLMUnavailable(Exception):
     """All providers exhausted."""
 
@@ -43,6 +52,9 @@ class ChatResult:
 
 _RETRYABLE_STATUS = {408, 429, 500, 502, 503, 529}
 _MAX_ATTEMPTS = 3
+# 429 = provider quota/rate limit (GLM escalation hit this). It clears with a
+# longer wait, so retry it separately and more patiently than generic errors.
+_RATE_LIMIT_MAX = 6
 
 
 class LLMClient:
@@ -50,6 +62,7 @@ class LLMClient:
                  gateway: bool = False, timeout: float = 180.0):
         self.budget = budget or Budget()
         self.timeout = timeout
+        self.exhausted = False  # set when a provider reports zero balance
         self._lock = threading.Lock()
         self.providers: list[Provider] = []
         for p in providers:
@@ -103,6 +116,7 @@ class LLMClient:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         attempt = 0
+        rate_limited = 0
         while True:
             attempt += 1
             try:
@@ -115,6 +129,26 @@ class LLMClient:
                 if attempt >= _MAX_ATTEMPTS:
                     raise
                 self._backoff(attempt)
+                continue
+            if resp.status_code == 429:
+                body = resp.text or ""
+                # Hard balance exhaustion (GLM code 1113 "余额不足或无可用资源包"):
+                # NOT transient — fail immediately, mark the provider dead so
+                # the escalation circuit-breaker disables GLM for the whole run
+                # instead of burning ~5 min of backoff per doomed challenge.
+                if any(s in body for s in ("1113", "余额", "insufficient", "balance")):
+                    self.exhausted = True
+                    raise QuotaExhausted(
+                        f"{provider.name} balance exhausted: {body[:120]}")
+                # quota/rate limit: wait it out patiently, don't burn the
+                # general attempt budget (run-xben GLM escalation lesson)
+                rate_limited += 1
+                if rate_limited > _RATE_LIMIT_MAX:
+                    raise RuntimeError(
+                        f"{provider.name} HTTP 429 after {rate_limited} waits: "
+                        f"{resp.text[:120]}")
+                time.sleep(min(90.0, 15.0 * rate_limited) + random.random())
+                attempt -= 1
                 continue
             if resp.status_code in _RETRYABLE_STATUS:
                 if attempt >= _MAX_ATTEMPTS:

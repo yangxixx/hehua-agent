@@ -30,6 +30,11 @@ class Config:
     kimi_api_key: str = ""
     kimi_model: str = "kimi-k3"
     llm_provider: str = "deepseek"   # primary: deepseek|qwen|glm|kimi
+    # parallelism / modes (runner)
+    pool: int = 3                    # concurrent challenge CONTAINERS (platform max-active)
+    deep_mode: str = "auto"          # auto | normal | deep
+    peers: int = 2                   # peer agents per challenge in deep mode
+    max_challenge_attempts: int = 3  # 1 flash sweep + up to 2 GLM/deep retries
     model_gateway: bool = False
     mock_llm: bool = False
     thinking: str = "on"   # on | off | auto (auto: on for hard/retry, off else)
@@ -105,4 +110,8 @@ def load_config() -> Config:
         mock_llm=os.getenv("MOCK_LLM", "0") == "1",
         thinking=os.getenv("HEHUA_THINKING", "on"),
         total_budget_min=_int("TOTAL_BUDGET_MIN", 360),
+        pool=_int("HEHUA_POOL", 3),
+        deep_mode=os.getenv("HEHUA_DEEP", "auto"),
+        peers=_int("HEHUA_PEERS", 2),
+        max_challenge_attempts=_int("HEHUA_MAX_ATTEMPTS", 3),
     )

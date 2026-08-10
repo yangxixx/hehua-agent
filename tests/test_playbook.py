@@ -36,3 +36,17 @@ def test_description_fallback_for_non_platform():
 
 def test_no_code_uses_description():
     assert pick_playbook("二进制 reverse", "") == "playbook_binary.md"
+
+
+def test_ai_and_blockchain_routing():
+    # 8/16 new dimensions — prefix guess + keyword fallback
+    assert pick_playbook("大模型聊天机器人 LLM 提示注入", "ai-01") == "playbook_ai.md"
+    assert pick_playbook("prompt injection jailbreak the AI agent", "x") == "playbook_ai.md"
+    assert pick_playbook("llm chatbot rag", "") == "playbook_ai.md"
+    assert pick_playbook("智能合约 reentrancy 以太坊", "bc-01") == "playbook_blockchain.md"
+    assert pick_playbook("blockchain solidity erc20 token", "chain-2") == "playbook_blockchain.md"
+    assert pick_playbook("web3 链上资产流转 DAO", "") == "playbook_blockchain.md"
+    # existing platform prefixes must NOT be hijacked by AI/blockchain keywords
+    assert pick_playbook("AI 辅助的代码审计平台", "a-01") == "playbook_web.md"  # a- stays web
+    assert pick_playbook("利用合约漏洞 exploit", "c-01") == "playbook_exploit.md"  # c- stays exploit
+

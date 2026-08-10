@@ -33,6 +33,7 @@ class ToolContext:
     last_submit: dict | None = None
     wrong_flags: set = field(default_factory=set)
     start_ts: float = field(default_factory=time.time)
+    gate_checked: bool = False     # finish-gate: one forced verify pass
 
 
 def build_schemas() -> list[dict]:
@@ -47,6 +48,11 @@ def build_schemas() -> list[dict]:
            {"command": {"type": "string"},
             "timeout": {"type": "integer", "description": "seconds, max 300"}},
            ["command"]),
+        fn("port_scan", "Bounded TCP port scan via nmap (ALWAYS use this, NEVER a "
+           "bash /dev/tcp loop which spawns runaway jobs). host=IP or IP:port; "
+           "ports='top100' | '1-1000' | 'full' | '22,80,443'.",
+           {"host": {"type": "string"}, "ports": {"type": "string"}},
+           ["host"]),
         fn("http_request", "Send an HTTP request; returns status, final URL, "
            "headers and (capped) body.",
            {"method": {"type": "string"}, "url": {"type": "string"},
@@ -82,6 +88,21 @@ def build_tools(ctx: ToolContext, cfg) -> dict:
         r = run_bash(command, ctx.workdir,
                      timeout=min(int(timeout or cfg.bash_timeout), cfg.bash_timeout_max),
                      head_tail=cfg.head_tail)
+        return (f"exit={r['exit_code']} elapsed={r['elapsed']}s\n{r['summary']}\n"
+                f"[full log: {r['log_path']}]")
+
+    def t_port_scan(host, ports="top100"):
+        # Bounded nmap wrapper — prevents the runaway bash /dev/tcp scans that
+        # once wedged a whole run. host may be IP or IP:port.
+        h = str(host).split(":")[0]
+        if str(ports) in ("top100", "top-100", ""):
+            parg = "--top-ports 100"
+        elif str(ports) == "full":
+            parg = "-p-"
+        else:
+            parg = f"-p {ports}"
+        cmd = f"nmap -Pn -T3 --max-rate 400 {parg} {h}"
+        r = run_bash(cmd, ctx.workdir, timeout=180, head_tail=cfg.head_tail)
         return (f"exit={r['exit_code']} elapsed={r['elapsed']}s\n{r['summary']}\n"
                 f"[full log: {r['log_path']}]")
 
@@ -159,6 +180,19 @@ def build_tools(ctx: ToolContext, cfg) -> dict:
         return msg
 
     def t_finish(summary="", give_up=False):
+        # finish-gate (#12): if submit said flags still remain, force ONE final
+        # harvest/verify pass before we let the agent stop (kills "died one step
+        # short" / missed multi-flag losses).
+        remaining = (ctx.last_submit or {}).get("remaining")
+        if (not ctx.gate_checked and not give_up and remaining
+                and int(remaining) > 0):
+            ctx.gate_checked = True
+            return ("FINISH GATE: submit reported " + str(remaining) + " flag(s) "
+                    "still REMAIN on this challenge. Before finishing, do a final "
+                    "sweep: `grep -rEo 'flag\\{[^}]+\\}' /challenge /flag /app "
+                    "/var/www /tmp 2>/dev/null`, check `env` and other "
+                    "routes/roles/params, and submit_flag any suspects. Then call "
+                    "finish again.")
         # run-6661 c-04 lesson: giving up at 5.6min with zero facts on a
         # still-booting target burned the attempt AND locked the retry gate
         # (no progress recorded). Block early give-ups that learned nothing;
@@ -175,6 +209,7 @@ def build_tools(ctx: ToolContext, cfg) -> dict:
         ctx.gave_up = bool(give_up)
         return "challenge attempt finished."
 
-    return {"bash": t_bash, "http_request": t_http, "read_file": t_read,
-            "write_file": t_write, "list_dir": t_list, "grep": t_grep,
-            "notes": t_notes, "submit_flag": t_submit, "finish": t_finish}
+    return {"bash": t_bash, "port_scan": t_port_scan, "http_request": t_http,
+            "read_file": t_read, "write_file": t_write, "list_dir": t_list,
+            "grep": t_grep, "notes": t_notes, "submit_flag": t_submit,
+            "finish": t_finish}
