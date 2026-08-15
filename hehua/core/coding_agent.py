@@ -165,7 +165,7 @@ def solve_coding(ch: dict, addrs: list, cfg: Config, llm, submit_fn, events,
         f"Save reusable scripts to scripts/ directory. "
         f"Check cloud metadata: curl -s http://metadata.tencentyun.com/latest/meta-data/ "
         f"and http://169.254.169.254/latest/meta-data/. "
-        f"Find and submit all flags.\n"
+        f"Report EVERY confirmed vulnerability via submit_flag (label + full writeup with the raw HTTP request packet).\n"
         f"Before calling finish(), write a STATE.md summarizing what you found "
         f"and what the next agent should try.")
     messages = [{"role": "system", "content": system},

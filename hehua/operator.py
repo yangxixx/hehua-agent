@@ -75,6 +75,8 @@ def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, ses
                 return f'网段渗透完成: {count} 个发现,覆盖 {len(result)} 个目标。'
             else:
                 findings, _ = pentest_target(target, cfg, llm, str(workroot), budget=b, instruction=instruction, llm_glm=llm_glm, deep=d, peers=peers, models=models)
+                from .pentest import REPORTS
+                rp = REPORTS.get(target, '')
                 session['findings'][target] = findings
                 session['targets'].append(target)
                 if not findings:

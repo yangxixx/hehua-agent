@@ -226,14 +226,9 @@ def build_tools(ctx: ToolContext, cfg, minimal: bool = False) -> dict:
             if not res["correct"]:
                 ctx.wrong_flags.add(flag)
             return f"correct={res['correct']} remaining={res['remaining']}"
-        # Soft format check: nudge surgical discipline without blocking (wrong
-        # submits are free). Catches truncated/garbage values before they waste
-        # a round-trip and teaches complete-token extraction.
-        warn = "" if _looks_like_flag(flag) else (
-            "[!] This doesn't match a standard flag shape (flag{...}/uuid/hex). "
-            "Likely a truncated or non-flag value — re-extract the FULL token "
-            "(`grep -oE 'flag\\{[^}]+\\}'` over source/logs/env) before "
-            "submitting variants. ")
+        # (pentest build: labels are vuln names like 'sql-injection:/login?user='
+        # — no CTF flag-shape check applies)
+        warn = ""
         if flag in ctx.wrong_flags:
             return (warn + "this exact flag was already proven WRONG on this "
                     "challenge — do not resubmit; change approach.")
