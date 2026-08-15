@@ -24,6 +24,10 @@ curl -s -X POST $RPC -H 'Content-Type: application/json' \
 ```
 - function selector = `keccak256("func(type1,type2)")` 前 4 字节；有 web3 时
   `Web3.keccak(text=sig)[:4].hex()`，没有就手算或让模型算（keccak 不是 sha3，别用 sha3）
+- **读状态不止 eth_call**：`eth_getStorageAt(addr, slot, "latest")` 直读存储槽
+  （owner/余额/未公开变量都躺在 slot 0/1/2…，配合源码变量声明顺序推槽位）；
+  `eth_getCode(addr, "latest")` 拿运行时字节码（无源码时 strings/反编译找函数
+  选择器）；`eth_getTransactionReceipt` 确认上链 + 读 event 日志（flag 有时走 event）。
 
 ## 核心漏洞类（对照源码逐个查，找"达成即解"）
 
@@ -66,12 +70,22 @@ tx = contract.functions.attack().build_transaction(
 signed = acct.sign_transaction(tx)
 print(w3.eth.send_raw_transaction(signed.raw_transaction).hex())
 ```
-有 foundry 时：`cast send $RPC $TO "attack()" --private-key $KEY`
+有 cast 时更省事：`cast send $CT "attack()" --rpc-url $RPC --private-key $KEY`；
+calldata 构造 `cast calldata "transfer(address,uint256)" 0xabc 100`；
+selector/keccak `cast sig "withdraw()"` / `cast keccak "abc"`；
+合约静态分析 `slither <file.sol>`（访问控制缺失/重入/溢出直接标出）。
 
-## ⚠️ 工具缺口（8/16 托管前必须处理）
-- 当前镜像**无 web3 / eth-account / foundry(cast/forge) / solc**；区块链题发交易需签名库。
-- 托管沙箱无公网 → 不能临时 pip。**8/16 前必须 bake**：`pip install web3 eth-account`（+ 可选 foundry 二进制）入 Dockerfile。
-- 临时兜底：用 curl `eth_call` 侦察（读不需签名）；发交易若题给私钥 + 镜像有 web3 才行。
+## ⚠️ 工具现状（2026-08-15 镜像已加区块链层——开题先逐项验证）
+- 开题第一步验证（哪项缺就记 notes(failure) 并走对应兜底）：
+  `python -c "import web3, eth_account"` / `command -v cast forge anvil solc slither`
+- `web3 eth-account`（签名/发交易）、`cast`（calldata 构造/eth_call/keccak/发交易
+  的瑞士军刀）、`solc-0.8.30/0.8.20/0.6.12/0.5.16`（多版本静态编译器，默认
+  `solc`）、`slither`（合约静态分析：直接 `slither contract.sol`，访问控制/重入
+  一把梭）、`pyevmasm`（无源码时 EVM 反汇编）。
+- **forge 离线坑**：forge build 按 pragma **自动联网下载 solc**——托管沙箱无网会
+  卡死。离线编译一律用本地 `solc` CLI（`solc --bin --abi attack.sol`），不要等 forge。
+- 全部缺的兜底：curl JSON-RPC（读不需签名）+ web3 缺则手写 RLP 签名，读状态用
+  eth_getStorageAt 直推槽位。
 
 ## 纪律
 - 先搞清"解的条件"再动手；区块链题常**一道交易即破**

