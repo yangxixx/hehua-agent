@@ -14,7 +14,10 @@
   （重复检测 / 无进展换向 / 预算强制收尾）与上下文滚动压缩，长程任务不崩
 - **8 维领域 playbook**：Web / 多阶段内网 / 组件利用 / 二进制 / 云 / 对抗规避 / AI 应用 / 区块链，
   按目标特征自动注入，附 payload 语料库
-- **SRC 式漏洞报告**：每个确认发现记录 类型 + PoC + 影响，经 `submit_flag` 汇总
+- **中文实时进度**：每个动作带模型名流式输出（`[glm] bash: ...`、`★ [glm] 发现漏洞: ...`），
+  每 45 秒一条进度汇总（已报告漏洞数 + 各模型当前在测什么）
+- **标准渗透测试报告**：测完自动生成 `out/<目标>/report.md` —— 风险汇总矩阵、
+  逐漏洞利用过程（含完整 HTTP 请求包原文、响应证据、影响、修复建议）
 
 ## 快速开始
 
@@ -34,22 +37,24 @@ python -m hehua
 ```
 
 ```
-hehua> 渗透 http://10.0.0.5
+hehua> 深度渗透http://10.0.0.5          ← 说"深度/深入/多模型"即启用多模型并行（也可 HEHUA_DEEP=deep 常开）
 [hehua] ▶ pentesting http://10.0.0.5  (budget 30min, models: flash, pro, glm, qwen)
-   [bash] nmap -sV --top-ports 100 10.0.0.5
-   [bash] curl -s http://10.0.0.5/admin/login.php
-   ★ FINDING: sql-injection:/news.php?id=
-   · reported: sql-injection:/news.php?id=
+   [flash] bash: {"command": "curl -s -i http://10.0.0.5/ | head -100"}
+   [pro] http_request: {"url": "http://10.0.0.5/index.php"}
+   ★ [glm] 发现漏洞: sql-injection:/vul/sqli_str.php?name=
+   [qwen] bash: {"command": "python sqli_dump.py --tables"}
+   ── 进度 [16:20:33] 已报告 1 个漏洞 ── flash: bash fuzz目录 | pro: http_request | glm: 报告漏洞 | qwen: sqli_dump
 [hehua] ✔ done http://10.0.0.5: 3 finding(s)
-   ★ sql-injection:/news.php?id=
+   ★ sql-injection:/vul/sqli_str.php?name=
    ★ idor:/api/order/{id}
    ★ weak-password:/admin/login.php
+[hehua] 📄 渗透测试报告已生成: out/http___10.0.0.5_/report.md
 
 hehua> 重点测一下 API 越权
 [带侧重指令重新渗透…]
 
 hehua> 上次找到什么了？
-助手> 共 3 个发现：…
+助手> 共 3 个发现：… 完整报告(含数据包/利用过程): out/http___10.0.0.5_/report.md
 
 hehua> exit
 ```
@@ -98,7 +103,8 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 3. **漏洞利用**：SQLi / 命令注入 / SSRF / LFI / 文件上传 / 反序列化 / SSTI / RCE；PoC 证明 + 数据提取
 4. **内网多阶段**：立足点 → socat/chisel 隧道 → 内网测绘 → 主题化密码攻击（品牌词×年份组合）
    → 凭证复用 → 提权（SUID/cron/capabilities）→ 横向移动
-5. **报告**：每个确认漏洞记录（类型 + PoC + 影响），终端实时输出，`out/events.jsonl` 留档
+5. **报告**：渗透结束自动生成标准测试报告 `out/<目标>/report.md`（风险矩阵 + 每漏洞的利用过程/
+   完整 HTTP 数据包/响应证据/影响/修复建议），附 `TRANSCRIPT.md` 原始命令日志与 `NOTES.md` 情报笔记
 6. **对话**：操作员 LLM 理解自然语言，可追问发现、调整策略、闲聊技术问题
 
 ## 8 维渗透知识库（`hehua/prompts/`）
