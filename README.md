@@ -172,6 +172,10 @@ hehua/      agent 本体（operator / pentest / core / llm / prompts）
 scripts/    scan / crawl / dirfuzz / paramgen / pivot（agent 运行时调用的辅助脚本）
 tools/      payload 语料库
 ```
+## 全自动流程输出
+<img width="1694" height="1083" alt="image" src="https://github.com/user-attachments/assets/2d7aaa26-ac51-4908-91c3-c4a9c4f79220" />
+
+<img width="1778" height="999" alt="image" src="https://github.com/user-attachments/assets/ddc473d0-56a4-4a3a-97ba-525bdcee2f61" />
 
 ## 合规
 
