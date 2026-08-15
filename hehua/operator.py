@@ -80,11 +80,13 @@ def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, ses
                 session['findings'][target] = findings
                 session['targets'].append(target)
                 if not findings:
-                    return f'渗透完成,未发现明显漏洞。已测试: {target}'
+                    return f'渗透完成,未发现明显漏洞。已测试: {target}' + (f'。报告: {rp}' if rp else '')
                 lines = [f'渗透完成: {len(findings)} 个发现。']
                 for f in findings[:10]:
                     lines.append(f"  - {f['finding']}")
-                return '\n'.join(lines)
+                if rp:
+                    lines.append(f'完整渗透测试报告(含数据包/利用过程): {rp}')
+                return chr(10).join(lines)
         except KeyboardInterrupt:
             return '渗透被用户中断。'
         except Exception as e:
