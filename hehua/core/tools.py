@@ -99,10 +99,12 @@ def build_schemas() -> list[dict]:
         fn("notes", "Record structured memory: kind=idea|fact|failure|todo.",
            {"kind": {"type": "string", "enum": ["idea", "fact", "failure", "todo"]},
             "content": {"type": "string"}}, ["kind", "content"]),
-        fn("submit_flag", "Submit a candidate flag. Idempotent; wrong submits are "
-           "not penalized. Returns whether correct and flags remaining.",
+        fn("submit_flag", "REPORT a confirmed vulnerability finding. Pass a short "
+           "label (e.g. 'sql-injection:/login?user=') and a writeup (type, PoC, "
+           "impact). This is a pentest, NOT a CTF — there is no flag to find; "
+           "report every real vulnerability you prove.",
            {"flag": {"type": "string"}, "writeup": {"type": "string"}}, ["flag"]),
-        fn("finish", "End the attempt on this challenge. The ONLY legal way to stop.",
+        fn("finish", "End the pentest of this target. The ONLY legal way to stop.",
            {"summary": {"type": "string"}, "give_up": {"type": "boolean"}},
            ["summary"]),
     ]
