@@ -104,6 +104,7 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 | `glm` | `GLM_API_KEY` | 智谱 GLM（Anthropic 兼容端点） |
 | `qwen` | `ALIYUN_API_KEY` | 阿里百炼 DashScope（OpenAI 兼容） |
 | `kimi` | `Kimi_API_KEY` | Kimi3） |
+| 其它LLM |
 
 每个模型一个独立 coding agent，同一目标各自连续攻击、通过 NOTES.md 共享事实与死路，
 任一 agent 拿到证明即汇总。未配置的模型自动跳过；只想单模型跑就不开 deep。
