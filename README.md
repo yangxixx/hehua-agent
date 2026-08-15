@@ -1,6 +1,6 @@
 # Hehua 荷花
 
-对话式**全链路自动化**渗透 Agent。在**授权靶场 / SRC 范围**内，一句自然语言指令——
+对话式**全链路自动化**渗透 Agent。在**授权靶场 / SRC 范围**内，支持任意数量、类型模型组合，一句自然语言指令——
 ——即可触发从侦察到报告的**全自动闭环**，全程无人干预：
 
 > 意图理解 → 多模型并行攻击 → 自动侦察 → 漏洞验证与利用 → 数据提取/凭证/提权 → 中文实时进度 → 标准渗透测试报告
@@ -104,6 +104,7 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 | `glm` | `GLM_API_KEY` | 智谱 GLM（Anthropic 兼容端点） |
 | `qwen` | `ALIYUN_API_KEY` | 阿里百炼 DashScope（OpenAI 兼容） |
 | `kimi` | `Kimi_API_KEY` | Kimi3） |
+
 每个模型一个独立 coding agent，同一目标各自连续攻击、通过 NOTES.md 共享事实与死路，
 任一 agent 拿到证明即汇总。未配置的模型自动跳过；只想单模型跑就不开 deep。
 
