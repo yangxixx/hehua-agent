@@ -178,6 +178,7 @@ tools/      payload 语料库
 <img width="1694" height="1083" alt="image" src="https://github.com/user-attachments/assets/2d7aaa26-ac51-4908-91c3-c4a9c4f79220" />
 
 <img width="1778" height="999" alt="image" src="https://github.com/user-attachments/assets/ddc473d0-56a4-4a3a-97ba-525bdcee2f61" />
+<img width="2343" height="1080" alt="image" src="https://github.com/user-attachments/assets/c77797f7-cf6f-4b16-a747-97b9508afe6b" />
 
 ## 合规
 
