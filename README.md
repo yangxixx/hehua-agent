@@ -60,6 +60,7 @@ python -m hehua pentest 10.0.0.0/24 --budget 15 --deep
 | `DEEPSEEK_API_KEY` | 主 LLM（OpenAI 兼容，也支持 qwen / glm / kimi） |
 | `GLM_API_KEY` + `GLM_MODEL=glm-5.2` | 可选，启用 GLM-5.2 深度模式升级 |
 | `ALIYUN_API_KEY` (+ `ALIYUN_BASE_URL` / `QWEN_MODEL`) | 可选，DashScope 千问端点 |
+| `DEEPSEEK_PRO_MODEL` | 可选，deep 模式第 2 个并行 solver（默认 deepseek-reasoner） |
 | `HEHUA_DEEP` | `auto`(默认) / `deep` / `normal` |
 | `HEHUA_PEERS` | 深度模式并行 agent 数（默认 2） |
 | `HEHUA_PENTEST_BUDGET` | 单目标默认预算（分钟，默认 30） |
@@ -70,8 +71,9 @@ python -m hehua pentest 10.0.0.0/24 --budget 15 --deep
 2. **认证测试**：自动注册双账号，测 IDOR / 越权 / JWT 篡改 / 未授权访问。
 3. **漏洞利用**：SQLi / 命令注入 / SSRF / 文件上传 / 反序列化 / RCE；PoC 证明 + 数据提取。
 4. **内网/多阶段**：立足点 → socat/chisel 隧道 → 内网测绘 → 凭证复用 → 横向移动。
-5. **报告**：每个确认的漏洞记录（类型 + PoC + 影响），实时输出到终端。
-6. **对话**：操作员 LLM 理解自然语言，可追问发现、调整策略、闲聊技术问题。
+5. **多模型并行（deep 模式）**：flash / pro / glm / qwen 各派一个 coding agent 同时打同一目标，共享 NOTES.md，首个证明 wins（配置了哪些 key 就启用哪些模型）。
+6. **报告**：每个确认的漏洞记录（类型 + PoC + 影响），实时输出到终端。
+7. **对话**：操作员 LLM 理解自然语言，可追问发现、调整策略、闲聊技术问题。
 
 ## 8 维渗透知识库（prompts/playbook_*）
 

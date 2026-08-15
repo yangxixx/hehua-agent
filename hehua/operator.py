@@ -16,7 +16,7 @@ def _fn(name, desc, props=None, required=None):
 def _tools_openai():
     return [_fn('start_pentest', '对目标发起自主渗透。返回发现的漏洞列表。', {'target': {'type': 'string', 'description': 'URL / IP:端口 / CIDR'}, 'instruction': {'type': 'string', 'description': "可选侧重,如'重点测登录越权'"}, 'budget': {'type': 'integer', 'description': '分钟数,默认30'}}, ['target']), _fn('get_findings', '查看所有已发现的漏洞/数据。', {'target': {'type': 'string', 'description': '可选,只看某个目标的发现'}}), _fn('get_targets', '查看已测试过的目标列表及状态。')]
 
-def operator_repl(cfg, llm, llm_glm=None, workroot='out', budget=30.0, deep=False, peers=2):
+def operator_repl(cfg, llm, llm_glm=None, workroot='out', budget=30.0, deep=False, peers=2, models=None):
     from .pentest import pentest_target, pentest_range, is_cidr, valid_target
     workroot = Path(workroot)
     workroot.mkdir(parents=True, exist_ok=True)
@@ -49,7 +49,7 @@ def operator_repl(cfg, llm, llm_glm=None, workroot='out', budget=30.0, deep=Fals
                         print(f'\n{res.content}')
                     break
                 for tc in res.tool_calls:
-                    result = _exec_tool(tc.name, tc.arguments, cfg, llm, llm_glm, workroot, budget, deep, peers, session)
+                    result = _exec_tool(tc.name, tc.arguments, cfg, llm, llm_glm, workroot, budget, deep, peers, session, models)
                     messages.append({'role': 'tool', 'tool_call_id': tc.id, 'content': str(result)[:3000]})
         except KeyboardInterrupt:
             print('\n  [已中断。继续输入或 exit 退出。]')
@@ -57,7 +57,7 @@ def operator_repl(cfg, llm, llm_glm=None, workroot='out', budget=30.0, deep=Fals
             print(f'\n[操作员错误: {e}]')
     print('\n[会话结束] 详细日志: out/events.jsonl ; 各目标笔记: out/<target>/notes.jsonl')
 
-def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, session):
+def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, session, models=None):
     if name == 'start_pentest':
         target = str(args.get('target', '')).strip()
         instruction = str(args.get('instruction', '')).strip()
@@ -67,13 +67,13 @@ def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, ses
         print(f'\n[开始渗透 {target} …]')
         try:
             if is_cidr(target):
-                result = pentest_range(target, cfg, llm, str(workroot), budget_per=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers)
+                result = pentest_range(target, cfg, llm, str(workroot), budget_per=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers, models=models)
                 count = sum((len(v) for v in result.values()))
                 session['findings'][target] = result
                 session['targets'].append(target)
                 return f'网段渗透完成: {count} 个发现,覆盖 {len(result)} 个目标。'
             else:
-                findings, _ = pentest_target(target, cfg, llm, str(workroot), budget=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers)
+                findings, _ = pentest_target(target, cfg, llm, str(workroot), budget=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers, models=models)
                 session['findings'][target] = findings
                 session['targets'].append(target)
                 if not findings:
