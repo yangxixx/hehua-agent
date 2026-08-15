@@ -14,7 +14,7 @@ def _fn(name, desc, props=None, required=None):
     return {'type': 'function', 'function': {'name': name, 'description': desc, 'parameters': params}}
 
 def _tools_openai():
-    return [_fn('start_pentest', '对目标发起自主渗透。返回发现的漏洞列表。', {'target': {'type': 'string', 'description': 'URL / IP:端口 / CIDR'}, 'instruction': {'type': 'string', 'description': "可选侧重,如'重点测登录越权'"}, 'budget': {'type': 'integer', 'description': '分钟数,默认30'}}, ['target']), _fn('get_findings', '查看所有已发现的漏洞/数据。', {'target': {'type': 'string', 'description': '可选,只看某个目标的发现'}}), _fn('get_targets', '查看已测试过的目标列表及状态。')]
+    return [_fn('start_pentest', '对目标发起自主渗透。返回发现的漏洞列表。', {'target': {'type': 'string', 'description': 'URL / IP:端口 / CIDR'}, 'instruction': {'type': 'string', 'description': "可选侧重,如'重点测登录越权'"}, 'budget': {'type': 'integer', 'description': '分钟数,默认30'}, 'deep': {'type': 'boolean', 'description': '深度模式:多模型并行攻击(用户说 深度/深入/多模型 时为true)'}}, ['target']), _fn('get_findings', '查看所有已发现的漏洞/数据。', {'target': {'type': 'string', 'description': '可选,只看某个目标的发现'}}), _fn('get_targets', '查看已测试过的目标列表及状态。')]
 
 def operator_repl(cfg, llm, llm_glm=None, workroot='out', budget=30.0, deep=False, peers=2, models=None):
     from .pentest import pentest_target, pentest_range, is_cidr, valid_target
@@ -62,18 +62,19 @@ def _exec_tool(name, args, cfg, llm, llm_glm, workroot, budget, deep, peers, ses
         target = str(args.get('target', '')).strip()
         instruction = str(args.get('instruction', '')).strip()
         b = float(args.get('budget', 0) or budget)
+        d = bool(args.get('deep')) or deep
         if not valid_target(target):
             return f'目标无效: {target}。需要 URL / IP:端口 / CIDR。'
         print(f'\n[开始渗透 {target} …]')
         try:
             if is_cidr(target):
-                result = pentest_range(target, cfg, llm, str(workroot), budget_per=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers, models=models)
+                result = pentest_range(target, cfg, llm, str(workroot), budget_per=b, instruction=instruction, llm_glm=llm_glm, deep=d, peers=peers, models=models)
                 count = sum((len(v) for v in result.values()))
                 session['findings'][target] = result
                 session['targets'].append(target)
                 return f'网段渗透完成: {count} 个发现,覆盖 {len(result)} 个目标。'
             else:
-                findings, _ = pentest_target(target, cfg, llm, str(workroot), budget=b, instruction=instruction, llm_glm=llm_glm, deep=deep, peers=peers, models=models)
+                findings, _ = pentest_target(target, cfg, llm, str(workroot), budget=b, instruction=instruction, llm_glm=llm_glm, deep=d, peers=peers, models=models)
                 session['findings'][target] = findings
                 session['targets'].append(target)
                 if not findings:
