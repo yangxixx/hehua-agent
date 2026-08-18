@@ -42,6 +42,20 @@ def _pentest_llms(cfg):
                         cfg.qwen_model, cfg.qwen_compact_model)
         lineup.append((LLMClient([qwen], Budget(cfg.token_soft_limit),
                                   gateway=cfg.model_gateway), 'qwen'))
+    # arbitrary extra models — any OpenAI-compatible endpoint (domestic or not):
+    # HEHUA_MODELS="kimi|https://api.moonshot.cn/v1|sk-xx|kimi-k3,hunyuan|https://api.hunyuan.cloud.tencent.com/v1|key|hunyuan-turbo"
+    for spec in (os.getenv('HEHUA_MODELS', '').split(',') if os.getenv('HEHUA_MODELS') else []):
+        spec = spec.strip()
+        if not spec:
+            continue
+        parts = [x.strip() for x in spec.split('|')]
+        if len(parts) < 4 or not all(parts[:4]):
+            print(f'[hehua] skip malformed HEHUA_MODELS entry: {spec[:60]}')
+            continue
+        name, base, key, model_id = parts[0], parts[1], parts[2], parts[3]
+        prov = Provider(name, base, key, model_id)
+        lineup.append((LLMClient([prov], Budget(cfg.token_soft_limit),
+                                  gateway=cfg.model_gateway), name))
     return llm, llm_glm, lineup
 
 
