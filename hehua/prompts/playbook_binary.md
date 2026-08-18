@@ -109,3 +109,33 @@ the same family often share the same protection scheme with different keys:
    ltrace ./binary                    # library calls (strcmp, malloc)
    strace ./binary                    # syscalls (open, read, write)
    ```
+
+## 移动端协议复现（APK 检测运行环境换密钥类）
+
+题面给 APK 且"仅在可信设备上向服务端换取数据"= 客户端侧有设备指纹/签名逻辑要伪造：
+1. APK 是 zip：`unzip -o app.apk -d apk/`；`strings classes.dex | grep -iE 'http|api|key|token|device'` 先摸端点与常量
+2. 没有 jadx 时：`dexdump`/`baksmali`（若有）或对 classes.dex 直接 strings+grep 定位关键方法名（native 库看 `lib/*.so` 的 strings）
+3. 抓协议三件套：静态定位 URL/参数 → 用 mitmproxy/SOAP 摆中间人（若能装）或直接构造重放 → 对照.dex 里硬编码的签名算法（常见 HMAC(deviceId+ts, secret)）用 python 复算
+4. "可信设备"判定通常=IMEI/ro.build.fingerprint/签名校验三元组之一，全在客户端可伪造——找到判定字段名后构造对应值重放
+5. 端点在 HTTP 服务上时同步打 Web 面（越权/未授权），复现协议只是入场券
+
+## Android 逆向工作流（jadx + androguard，镜像已装）
+
+1. **分诊**：`unzip -o app.apk -d apk/`；`strings -n 8 apk/classes*.dex | grep -iE 'http|api|key|token|secret|device|finger'`；`cat apk/AndroidManifest.xml | head -40`（导出组件/权限线索）
+2. **jadx 反编译**（Java 源码级，比 dex strings 强一个量级）：
+   `jadx -d out app.apk` → `grep -rn "isTrusted\|Build.FINGERPRINT\|getDeviceId\|HMAC\|signature" out/sources | head -30`
+   重点找：设备指纹三元组（IMEI/ro.build.fingerprint/签名校验）、协议签名算法、硬编码密钥
+3. **androguard 脚本化**（批量/精确分析）：
+   ```python
+   from androguard.core.apk import APK
+   from androguard.core.dex import DEX
+   a = APK("app.apk")
+   print(a.get_main_activity(), a.get_permissions())
+   d = DEX(a.get_dex())
+   for m in d.get_methods():
+       if "sign" in m.name or "check" in m.name or "trust" in m.name:
+           print(m.class_name, m.name)
+   ```
+4. **协议复现**：定位请求构造函数（常在 Utils/Net/Api 类）→ 抄出签名算法 → python 重放；
+   "可信设备"判定九成是 `Build.FINGERPRINT`/签名 hash 比对——直接在重放请求里构造对应值
+5. **动态兜底**：静态走不通时 Frida hook（`frida -U -f pkg -l hook.js`）拦截判定函数返回值

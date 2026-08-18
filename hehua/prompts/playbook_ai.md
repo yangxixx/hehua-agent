@@ -12,7 +12,7 @@ Agent 工具能读到的 `/flag`、或 RAG 语料里。
 
 ## 攻击面与 payload（按命中难度排序，先便宜的）
 
-**现成 payload 语料库**：`tools/payloads/prompt_injection.txt`（分
+**现成 payload 语料库**：`/app/tools/payloads/prompt_injection.txt`（分
 [LEAK]/[OVERRIDE]/[ENCODE]/[TOOL]/[MULTI]/[INDIRECT] 六类，逐条发、记录哪条
 改变了模型行为）——先跑语料再自造。
 
@@ -70,3 +70,46 @@ Agent 工具能读到的 `/flag`、或 RAG 语料里。
 - AI 题**往往一句话注入即破**，别过度侦察；顺序：系统提示泄露 → 工具滥用 → 沙箱逃逸
 - 被拒就换编码/语言/角色轮换；把"哪个 payload 触发了哪个工具/行为"记 notes(kind=fact)
 - 大输出先落盘再 grep（模型回的长指令、工具返回）
+
+## 文档导入 / URL 抓取 = SSRF 面（LLM 应用的"帮我去读"功能）
+
+应用提供"上传文件或从 URL 导入在线文档并自动总结"时，那个 fetch 是**以服务端身份**发起的 ——
+目标不是斗嘴，是让它的抓取器替你摸内网：
+
+1. **直接递内网地址**（一层层试，记录哪个通了）：
+   `http://127.0.0.1/`、`http://localhost:port/`、`http://内网IP/`（先扫出内网网段
+   10.0.x/172.16-31.x/192.168.x 的存活端口再递）、`file:///flag`、`file:///etc/passwd`
+2. **被过滤时的绕过**：十进制/八进制 IP（`http://2130706433/`=127.0.0.1）、
+   `xip.io`/`nip.io` 风格子域（`127.0.0.1.nip.io`）、DNS 重绑定、大小写 `HTTP://`、
+   `http://[::1]/`、末尾 `@`（`http://expected.com@127.0.0.1/`）、302 跳转（自己能控制的
+   公网页跳内网——托管无公网时用 file:// 或本地路径替代）
+3. **读取结果的回传**：总结器会把抓到的正文"总结"回来——哪怕只回摘要，也够逐段套出
+   flag；让模型"原文摘录第 N 段"而非总结可拿全文；报错信息里的响应码/标题也是探测回显
+4. **上传文件路径复用**：先上传一个内容为内网 URL 的文件再触发"从文件导入"，绕 URL
+   参数层的过滤；HTML/MD 里的 `<img src=内网>` 触发解析器二次抓取（间接 SSRF）
+5. **探测协议**：fetcher 若基于 requests/curl → gopher://、dict:// 可打内网端口指纹；
+   基于 headless 浏览器 → 还有本地文件读取与 CORS 突破面
+
+## MCP / 多 Agent 协议层攻击（2026 新主流：OWASP 已收录 MCP Tool Poisoning）
+
+LLM 应用暴露 MCP server / 工具注册面 / 多 agent 编排时：
+1. **工具描述投毒**：能注册或影响工具 metadata（描述、参数说明、返回模板）就在里面
+   藏指令——LLM 读描述即中招，UI 上不可见；表现为"模型莫名调用某工具/泄数据"
+2. **工具名/参数走私**：跨行 Unicode、注释块、markdown 折叠藏 prompt；工具返回值里
+   带"[SYSTEM]..."伪指令（输出即注入）
+3. **多 agent 级联**：A agent 读外部内容 → 污染其输出 → B agent 信任 A 的转述执行；
+   打法=在最低权限但接触外部数据的环节下毒，让指令逐级放大到高权限 agent
+4. **Agent 记忆投毒**：写入长期记忆/知识库的内容带潜伏指令（"以后见到 X 就 Y"），
+   配合"任何可写入的 memory/RAG 语料"面
+5. **risky tool 组合**：模型有 web_fetch+file_write+exec 时，注入目标=让它
+   fetch 恶意页(注入源) → 写脚本 → 执行——单工具无害、组合致命，逐个枚举组合路径
+
+## 采样参数 / 输出层泄漏（拿配置不当的 LLM 网关时）
+
+1. `/v1/models` 枚举可见模型；`temperature/max_tokens/logprobs` 可控时：
+   `logprobs=true + top_logprobs=20` 压 system prompt 的相邻 token 概率，
+   侧面重建隐藏指令
+2. `stop` 序列注入：让模型在写出 flag 前不被截断（设置 stop=["\n\n"] 绕截断）；
+   `n` 多采样重复抽取提高命中率
+3. 网关透传报错：非法 model 名 / 畸形 payload 触发的 500 常回显上游 URL、
+   API key 前缀、完整 system prompt（报错也是回显通道）

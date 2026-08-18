@@ -1,0 +1,27 @@
+I cannot fulfill this request. I am programmed to follow safety guidelines that prohibit generating lists of actionable exploit payloads or offensive tools, including Server-Side Template Injection (SSTI) variants intended for Remote Code Execution (RCE). I cannot provide payloads designed to bypass security controls or execute unauthorized code, even for educational or testing purposes.
+I can, however, explain the mechanics of SSTI, how these specific template engines process input securely versus insecurely, and general strategies for defending against these vulnerabilities.
+SSTI occurs when an application dynamically generates an HTML page or other output using user-supplied input directly within a template engine, rather than passing it as a static parameter.
+**Vulnerable Example (Conceptual):**
+If an application allows a user to set their profile name and the server renders it like this:
+`render_template_string("Hello " + username)`
+If a user sets their username to `{{ 7 * 7 }}`, the template engine evaluates the expression, and the output becomes `Hello 49`. This confirms the vulnerability.
+Template engines are powerful and often include methods to interact with the underlying operating system or execute code. While engines provide sandboxing or restrict access to dangerous methods, attackers often find ways to escape these sandboxes by traversing the object hierarchy to access base classes (like `Object` in Java or Python) and subsequently invoking system commands (e.g., `os.system`, `Runtime.exec`).
+1.  **Jinja2 (Python):**
+*   Jinja2 evaluates expressions within `{{ ... }}` or `{% ... %}` tags.
+*   RCE often involves accessing Python's underlying object model (e.g., traversing `__class__`, `__mro__`, `__subclasses__`) to find and execute available system command libraries.
+2.  **Twig (PHP):**
+*   Twig uses `{{ ... }}` for output.
+*   Historically, Twig allowed execution via features like `_self` (referring to the template itself) which could be manipulated to execute arbitrary PHP code or by accessing global variables if not properly restricted.
+3.  **FreeMarker & Velocity (Java):**
+*   FreeMarker uses `${...}` and `<#...>` tags. Velocity uses `$`, `#set`, etc.
+*   RCE in these engines typically involves leveraging built-in classes (like `freemarker.template.utility.Execute` in FreeMarker) or interacting with `java.lang.Runtime` if the security framework (like the SecurityManager) is misconfigured or bypassed.
+4.  **Smarty (PHP):**
+*   Smarty uses `{$...}` tags.
+*   If security is disabled, tags like `{php}` (in older versions) or manipulating `{if}` statements to execute arbitrary PHP code can lead to RCE.
+The most effective way to prevent SSTI is to ensure strict separation between static templates and dynamic user input.
+1.  **Use Logic-Less Templates:** Where possible, use logic-less templating engines (like Mustache) that do not allow execution of code or complex object traversal.
+2.  **Pass Variables Properly:** Never concatenate user input directly into the template string. Always pass user input as a variable context to the engine.
+*   *Bad:* `render("Hello " + name)`
+*   *Good:* `render("Hello {{ name }}", { name: name })`
+3.  **Sandboxing:** Enable the built-in sandbox or security features provided by the template engine. For example, Smarty has a `$security_policy` array, and FreeMarker allows defining allowed classes.
+4.  **Input Validation and Sanitization:** Validate all user input strictly against allowlists (e.g., alphanumeric characters only for usernames) to prevent template syntax from being injected.
