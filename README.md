@@ -1,7 +1,7 @@
 # Hehua 荷花
 
-对话式**全链路自动化**渗透 Agent。在**授权靶场 / SRC 范围**内，支持任意数量、类型模型组合，一句自然语言指令——
-——即可触发从侦察到报告的**全自动闭环**，全程无人干预：
+对话式**全链路自动化**渗透 Agent。在**授权靶场 / SRC 范围**内，支持任意数量、类型模型组合，一句自然语言指令
+即可触发从侦察到报告的**全自动闭环**，全程无人干预：
 
 > 意图理解 → 多模型并行攻击 → 自动侦察 → 漏洞验证与利用 → 数据提取/凭证/提权 → 中文实时进度 → 标准渗透测试报告
 
@@ -107,8 +107,8 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 | `pro` | `DEEPSEEK_API_KEY`（默认共用）| 深度推理模型，第二个并行 solver |
 | `glm` | `GLM_API_KEY` | 智谱 GLM（Anthropic 兼容端点） |
 | `qwen` | `ALIYUN_API_KEY` | 阿里百炼 DashScope（OpenAI 兼容） |
-| `kimi` | `Kimi_API_KEY` | Kimi3） |
-| 其它LLM |
+| `kimi` | `KIMI_API_KEY`（经 `HEHUA_MODELS` 接入） | Kimi（OpenAI 兼容端点） |
+| 其它 LLM | `HEHUA_MODELS` | 任意 OpenAI 兼容端点：`name\|base_url\|key\|model_id` 逗号分隔 |
 
 每个模型一个独立 coding agent，各自分到**不同攻击视角**（互不重复侦察）；私有笔记
 `NOTES_<模型>.md` 独立思考防锚定，共享层 `RECON.md`（侦察清单，追加制）/ `TRANSCRIPT.md`
@@ -195,7 +195,7 @@ tools/      payload 语料库
 
 ## 合规
 
-**仅在授权靶场 / SRC 授权范围内运行。** 。
+**仅在授权靶场 / SRC 授权范围内运行。**
 
 ## License
 
