@@ -5,7 +5,7 @@ import json
 import threading
 from pathlib import Path
 
-KINDS = ("idea", "fact", "failure", "todo")
+KINDS = ("idea", "fact", "failure", "todo", "claim", "fork")
 
 
 class Notes:

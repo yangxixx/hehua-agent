@@ -5,7 +5,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 import httpx
-from ..gateway import rewrite_for_gateway
 from .budget import Budget
 from .registry import Provider
 
@@ -36,17 +35,12 @@ _RATE_LIMIT_MAX = 6
 
 class LLMClient:
 
-    def __init__(self, providers: list[Provider], budget: Budget | None=None, gateway: bool=False, timeout: float=180.0):
+    def __init__(self, providers: list[Provider], budget: Budget | None=None, timeout: float=180.0):
         self.budget = budget or Budget()
         self.timeout = timeout
         self.exhausted = False
         self._lock = threading.Lock()
-        self.providers: list[Provider] = []
-        for p in providers:
-            if not p.usable:
-                continue
-            base = rewrite_for_gateway(p.base_url) if gateway else p.base_url
-            self.providers.append(Provider(p.name, base, p.api_key, p.model, p.compact_model))
+        self.providers: list[Provider] = [p for p in providers if p.usable]
         self._idx = 0
 
     def chat(self, messages: list[dict], tools: list[dict] | None=None, model_role: str='primary', temperature: float=0.3, thinking: str | None=None) -> ChatResult:

@@ -37,7 +37,7 @@ def _bash_guard(command: str) -> str | None:
 
 
 def run_bash(command: str, workdir: str | Path, timeout: int = 120,
-             head_tail: int = 4096) -> dict:
+             head_tail: int = 4096, pgid_sink=None) -> dict:
     guard = _bash_guard(command)
     if guard:
         return {"exit_code": -1, "log_path": "", "summary": guard,
@@ -60,6 +60,12 @@ def run_bash(command: str, workdir: str | Path, timeout: int = 120,
                 shell=argv is None, cwd=workdir, stdout=f, stderr=f,
                 stdin=subprocess.DEVNULL, env=env,
                 start_new_session=True)   # own process group -> killpg reaches grandchildren
+            if pgid_sink is not None:
+                try:   # record the pgid NOW (leader alive): `cmd &` stragglers
+                    pgid_sink(_pgid_of(p.pid))  # (proxies/tunnels) share this
+                except Exception:  # noqa: BLE001  group and are reaped by pgid
+                    pass            # at attempt end, even post-leader-exit
+
             try:
                 code = p.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -96,6 +102,57 @@ def _kill_tree(pid: int) -> None:
             os.kill(pid, 9)                      # fallback: just the leader
     except OSError:
         pass
+
+
+def _pgid_of(pid: int) -> int:
+    """Process-group id, captured while the leader is ALIVE. Killing by pgid
+    later still works after the leader exits (`cmd &` orphans stay in the
+    group) — killpg(getpgid(pid)) after leader death raises instead."""
+    try:
+        return os.getpgid(pid) if hasattr(os, "getpgid") else pid
+    except (ProcessLookupError, OSError):
+        return pid
+
+
+def kill_pgid(pgid: int) -> None:
+    """Kill an entire process group by its (numeric) pgid — reaches orphaned
+    `cmd &` stragglers (proxies/tunnels) even after their leader exited."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(pgid, 9)
+        elif os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pgid)],
+                           capture_output=True, timeout=10)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def spawn_bash(command: str, workdir: str | Path) -> dict:
+    """Launch a background bash task — NO timeout, the MODEL decides when to
+    poll (bash_status) or kill (bash_kill). Output spools to a log file the
+    registry knows; safety comes from killpg + run-end container teardown,
+    not from a fixed timer. Returns registry info or {"error": ...}."""
+    guard = _bash_guard(command)
+    if guard:
+        return {"error": guard}
+    workdir = Path(workdir)
+    outdir = workdir / "out"
+    outdir.mkdir(parents=True, exist_ok=True)
+    n = len(list(outdir.glob("bg_*.log"))) + 1
+    log = outdir / f"bg_{n:03d}.log"
+    argv = [_BASH, "-c", command] if _BASH else None
+    env = dict(os.environ)
+    env.setdefault("HEHUA_ROOT", str(Path(__file__).resolve().parents[2]))
+    try:
+        with open(log, "wb") as f:
+            p = subprocess.Popen(
+                argv if argv else command,
+                shell=argv is None, cwd=workdir, stdout=f, stderr=f,
+                stdin=subprocess.DEVNULL, env=env,
+                start_new_session=True)   # own group -> bash_kill reaps the tree
+    except OSError as e:
+        return {"error": f"[spawn error] {e}"}
+    return {"pid": p.pid, "proc": p, "log_path": str(log), "command": command}
 
 
 def _head_tail(text: str, size: int, log_path: str) -> str:

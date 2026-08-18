@@ -1,7 +1,7 @@
-"""Tool set (9): bash / http_request / file ops / grep / notes / submit_flag / finish."""
+"""Tool set: bash(+bg trio) / port_scan / r2 / http_request / file ops / grep /
+notes / submit_flag(report finding) / finish."""
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -10,22 +10,7 @@ from pathlib import Path
 import httpx
 
 from .memory import Notes
-from .sandbox import run_bash
-
-# Flag-format sanity (surgical-submit discipline, à la ATX's 4-failure run).
-# submit_flag still accepts anything (wrong submits are free), but a non-match
-# warns the agent it likely extracted a truncated/non-flag value.
-_UUID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
-_HEX = re.compile(r"^[0-9a-fA-F]{16,}$")
-
-
-def _looks_like_flag(s: str) -> bool:
-    s = s.strip()
-    if not (6 <= len(s) <= 200):
-        return False
-    if "{" in s and "}" in s:            # flag{...} / ctf{...} / {token}
-        return True
-    return bool(_UUID.match(s) or _HEX.match(s))
+from .sandbox import _kill_tree, _pgid_of, run_bash, spawn_bash
 
 
 def cap(text: str, max_bytes: int = 8192) -> str:
@@ -40,17 +25,21 @@ def cap(text: str, max_bytes: int = 8192) -> str:
 class ToolContext:
     workdir: Path
     notes: Notes
-    submit_fn: object            # (flag, writeup) -> dict(correct, remaining)
+    submit_fn: object            # (label, writeup) -> dict(correct, remaining, note)
     addrs: list = field(default_factory=list)
     finished: bool = False
     finish_summary: str = ""
     gave_up: bool = False
     last_submit: dict | None = None
-    wrong_flags: set = field(default_factory=set)
     start_ts: float = field(default_factory=time.time)
-    gate_checked: bool = False     # finish-gate: one forced verify pass
-    # swarm: when set, the `notes` tool routes here (Blackboard.add_fact / add_intent)
-    # instead of Notes.add — same tool surface feeds the Fact/Intent board.
+    # background bash tasks: id -> {"proc", "log_path", "command", "started"}
+    bg_tasks: dict = field(default_factory=dict)
+    # every bash session's pgid (foreground AND background, incl. `cmd &`
+    # stragglers sharing the group) — the runner kills them all at run end so
+    # half-built proxies/tunnels die with the session
+    pgids: list = field(default_factory=list)
+    # when set, the `notes` tool routes here (shared-notes sink with locking)
+    # instead of Notes.add
     notes_sink: object = None
 
 
@@ -62,10 +51,23 @@ def build_schemas() -> list[dict]:
                            "required": required}}}
     return [
         fn("bash", "Run a shell command in the isolated workdir. Long output is "
-           "spooled to a log file; you get head+tail and the log path.",
+           "spooled to a log file; you get head+tail and the log path. For "
+           "long-running jobs (nmap -p-, sqlmap, hydra, long fuzzing) pass "
+           "background=true — it starts immediately with NO timer and YOU "
+           "decide when it's done by polling bash_status.",
            {"command": {"type": "string"},
-            "timeout": {"type": "integer", "description": "seconds, max 300"}},
+            "timeout": {"type": "integer", "description": "foreground safety "
+                       "ceiling in seconds (default 1200). Irrelevant when "
+                       "background=true."},
+            "background": {"type": "boolean", "description": "run as a polled "
+                          "background task — no timer, model-judged lifetime"}},
            ["command"]),
+        fn("bash_status", "Poll a background bash task: running (with output "
+           "tail) or done (exit code + head/tail). Call repeatedly until YOU "
+           "judge the task finished or doomed.",
+           {"task_id": {"type": "integer"}}, ["task_id"]),
+        fn("bash_kill", "Kill a background bash task (whole process group).",
+           {"task_id": {"type": "integer"}}, ["task_id"]),
         fn("port_scan", "Bounded TCP port scan via nmap (ALWAYS use this, NEVER a "
            "bash /dev/tcp loop which spawns runaway jobs). host=IP or IP:port; "
            "ports='top100' | '1-1000' | 'full' | '22,80,443'.",
@@ -75,7 +77,7 @@ def build_schemas() -> list[dict]:
            "(decompile, list functions, find strings, control-flow graph). You "
            "generate r2 commands; the tool executes them and returns structured "
            "output. Examples: 'aaa; afl' (analyze+list funcs), 'pdf @main' "
-           "(decompile main), 'iz~flag' (search strings for flag), 'axt @sym' "
+           "(decompile main), 'iz~secret' (search strings), 'axt @sym' "
            "(cross-references).",
            {"binary": {"type": "string", "description": "path to the binary file"},
             "commands": {"type": "string", "description": "r2 commands separated by ;"}},
@@ -96,8 +98,14 @@ def build_schemas() -> list[dict]:
         fn("grep", "Regex-search a file for patterns (returns matching lines).",
            {"pattern": {"type": "string"}, "path": {"type": "string"}},
            ["pattern", "path"]),
-        fn("notes", "Record structured memory: kind=idea|fact|failure|todo.",
-           {"kind": {"type": "string", "enum": ["idea", "fact", "failure", "todo"]},
+        fn("notes", "Record structured memory. kinds: fact (raw observation "
+           "+ your reading, e.g. 'GET /admin -> 403 role=guest: needs auth'), "
+           "failure (ruled-out angle + why), idea (hypothesis), claim "
+           "(lane you are taking now — parallel agents avoid duplicating it), "
+           "fork (divergence between entries: state changed or interpretations "
+           "differ — an OPPORTUNITY: find what caused the change).",
+           {"kind": {"type": "string",
+                     "enum": ["idea", "fact", "failure", "todo", "claim", "fork"]},
             "content": {"type": "string"}}, ["kind", "content"]),
         fn("submit_flag", "REPORT a confirmed vulnerability finding. Pass a short "
            "label (e.g. 'sql-injection:/login?user=') and a writeup (type, PoC, "
@@ -105,24 +113,87 @@ def build_schemas() -> list[dict]:
            "report every real vulnerability you prove.",
            {"flag": {"type": "string"}, "writeup": {"type": "string"}}, ["flag"]),
         fn("finish", "End the pentest of this target. The ONLY legal way to stop.",
-           {"summary": {"type": "string"}, "give_up": {"type": "boolean"}},
+           {"summary": {"type": "string"},
+            "give_up": {"type": "boolean"}},
            ["summary"]),
     ]
 
 
-def build_tools(ctx: ToolContext, cfg, minimal: bool = False) -> dict:
-    """name -> callable(**args) -> str result.
+def _infra_note(ctx, line: str) -> None:
+    """Append infrastructure state to INFRA.md — the shared persistent record
+    of background tasks (proxies/tunnels/scans): PARALLEL models read it to
+    reuse instead of rebuild; the report reads it to find logs, and the run
+    end reaps everything."""
+    try:
+        with open(Path(ctx.workdir) / "INFRA.md", "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] {line}\n")
+    except OSError:
+        pass
 
-    minimal=True (swarm workers): submit_flag/finish return bare results — no
-    finish-gate, no early-give-up rejection, no surgical-submit nudges. Trusts
-    the model (Cairn philosophy). Default False = legacy behavior unchanged."""
 
-    def t_bash(command, timeout=120):
-        r = run_bash(command, ctx.workdir,
-                     timeout=min(int(timeout or cfg.bash_timeout), cfg.bash_timeout_max),
-                     head_tail=cfg.head_tail)
+def build_tools(ctx: ToolContext, cfg) -> dict:
+    """name -> callable(**args) -> str result."""
+
+    def t_bash(command, timeout=None, background=False):
+        """background=True: no timer at all — the model polls bash_status /
+        kills via bash_kill when IT judges the task done/doomed. Foreground
+        keeps only a generous safety ceiling (1200s) so a wedged command
+        can't eat the whole session silently."""
+        if background:
+            info = spawn_bash(command, ctx.workdir)
+            if "error" in info:
+                return info["error"]
+            tid = len(ctx.bg_tasks) + 1
+            ctx.bg_tasks[tid] = {"proc": info["proc"],
+                                 "log_path": info["log_path"],
+                                 "command": command,
+                                 "started": time.time()}
+            ctx.pgids.append(_pgid_of(info["proc"].pid))
+            _infra_note(ctx, f"bg task {tid} START: {command[:140]} "
+                             f"| log: {info['log_path']}")
+            return (f"[bg task {tid} started] log: {info['log_path']}\n"
+                    f"Poll with bash_status({tid}); kill with bash_kill({tid}). "
+                    f"Recorded in INFRA.md so parallel models can reuse it. "
+                    f"The task survives this tool call — keep working and check "
+                    f"back, or poll repeatedly until YOU decide it's done.")
+        to = int(timeout) if timeout else cfg.bash_timeout_max
+        to = min(to, cfg.bash_timeout_max)
+        r = run_bash(command, ctx.workdir, timeout=to,
+                     head_tail=cfg.head_tail, pgid_sink=ctx.pgids.append)
         return (f"exit={r['exit_code']} elapsed={r['elapsed']}s\n{r['summary']}\n"
                 f"[full log: {r['log_path']}]")
+
+    def t_bash_status(task_id):
+        t = ctx.bg_tasks.get(int(task_id))
+        if t is None:
+            return f"[bg] no such task: {task_id}"
+        rc = t["proc"].poll()
+        elapsed = round(time.time() - t["started"], 1)
+        try:
+            out = Path(t["log_path"]).read_text(encoding="utf-8",
+                                                errors="replace")
+        except OSError:
+            out = ""
+        if rc is None:
+            tail = out[-cfg.head_tail:] if out else "(no output yet)"
+            return (f"[bg task {task_id} RUNNING {elapsed}s]\n$ {t['command']}\n"
+                    f"...tail...\n{tail}\n"
+                    f"[still running — poll again, or bash_kill if you judge "
+                    f"it doomed]")
+        headtail = (out if len(out) <= cfg.head_tail * 2
+                    else out[:cfg.head_tail] + "\n...\n" + out[-cfg.head_tail:])
+        _infra_note(ctx, f"bg task {task_id} DONE exit={rc} ({elapsed}s): "
+                         f"{t['command'][:100]}")
+        return (f"[bg task {task_id} DONE {elapsed}s exit={rc}]\n$ {t['command']}\n"
+                f"{headtail}\n[full log: {t['log_path']}]")
+
+    def t_bash_kill(task_id):
+        t = ctx.bg_tasks.get(int(task_id))
+        if t is None:
+            return f"[bg] no such task: {task_id}"
+        _kill_tree(t["proc"].pid)
+        _infra_note(ctx, f"bg task {task_id} KILLED: {t['command'][:100]}")
+        return f"[bg task {task_id} killed]"
 
     def t_port_scan(host, ports="top100"):
         h = str(host).split(":")[0]
@@ -133,7 +204,24 @@ def build_tools(ctx: ToolContext, cfg, minimal: bool = False) -> dict:
         else:
             parg = f"-p {ports}"
         cmd = f"nmap -Pn -T3 --max-rate 400 {parg} {h}"
-        r = run_bash(cmd, ctx.workdir, timeout=180, head_tail=cfg.head_tail)
+        if "-p-" in parg:
+            # full sweep takes minutes — no fixed timer, run as a polled bg
+            # task (the model decides when it's done; old 180s cut killed
+            # scans mid-sweep)
+            info = spawn_bash(cmd, ctx.workdir)
+            if "error" in info:
+                return info["error"]
+            tid = len(ctx.bg_tasks) + 1
+            ctx.bg_tasks[tid] = {"proc": info["proc"],
+                                 "log_path": info["log_path"],
+                                 "command": cmd,
+                                 "started": time.time()}
+            _infra_note(ctx, f"bg task {tid} START: nmap full sweep of {h} "
+                             f"| log: {info['log_path']}")
+            return (f"[bg task {tid} started: nmap full sweep of {h}] "
+                    f"log: {info['log_path']}\nPoll bash_status({tid}) until "
+                    f"done — keep attacking other angles meanwhile.")
+        r = run_bash(cmd, ctx.workdir, timeout=1200, head_tail=cfg.head_tail)
         return (f"exit={r['exit_code']} elapsed={r['elapsed']}s\n{r['summary']}\n"
                 f"[full log: {r['log_path']}]")
 
@@ -159,7 +247,7 @@ def build_tools(ctx: ToolContext, cfg, minimal: bool = False) -> dict:
     def t_http(url, method="GET", headers=None, body=None, follow_redirects=True):
         try:
             r = httpx.request(method, url, headers=headers or {}, content=body,
-                              follow_redirects=bool(follow_redirects), timeout=30,
+                              follow_redirects=bool(follow_redirects), timeout=60,
                               verify=False)
         except httpx.HTTPError as e:
             return f"[http error] {type(e).__name__}: {e}"
@@ -210,78 +298,51 @@ def build_tools(ctx: ToolContext, cfg, minimal: bool = False) -> dict:
         return cap("\n".join(hits) or "(no matches)")
 
     def t_notes(kind, content):
-        # swarm: route to the Blackboard (facts → Fact, ideas → claimable Intent)
-        # so findings are a shared system asset, not per-agent recall.
         if ctx.notes_sink is not None:
             return ctx.notes_sink(kind, content)
         return ctx.notes.add(kind, content)
 
     def t_submit(flag, writeup=""):
-        flag = str(flag).strip()
-        if minimal:
-            # swarm: bare result, no nudges. submit_fn side-effect (last_submit)
-            # is how the worker/orchestrator learns a flag landed.
-            res = ctx.submit_fn(flag, str(writeup))
-            ctx.last_submit = res
-            if not res["correct"]:
-                ctx.wrong_flags.add(flag)
-            return f"correct={res['correct']} remaining={res['remaining']}"
-        # (pentest build: labels are vuln names like 'sql-injection:/login?user='
-        # — no CTF flag-shape check applies)
-        warn = ""
-        if flag in ctx.wrong_flags:
-            return (warn + "this exact flag was already proven WRONG on this "
-                    "challenge — do not resubmit; change approach.")
-        res = ctx.submit_fn(flag, str(writeup))
+        label = str(flag).strip()
+        res = ctx.submit_fn(label, str(writeup))
         ctx.last_submit = res
-        if not res["correct"]:
-            ctx.wrong_flags.add(flag)
-            return (warn + "incorrect — recorded as decoy/wrong; analyze WHY "
-                    "(decoy cred? truncated value?) before trying variants.")
-        msg = f"correct={res['correct']} remaining={res['remaining']}"
-        if res["correct"] and res["remaining"] > 0:
-            msg += (f" — {res['remaining']} more flag(s) on this challenge: "
-                    "keep hunting (other routes/roles/params).")
-        return warn + msg
+        if res.get("note"):
+            return ("[duplicate] " + res["note"] +
+                    " — refine the label/writeup, or hunt a DIFFERENT issue.")
+        return (f"✔ finding recorded: {label}\n"
+                "Real applications usually hold several issues and deeper "
+                "access reveals more — keep hunting (other routes/roles/"
+                "params/upgrades).")
 
     def t_finish(summary="", give_up=False):
-        if minimal:
-            # swarm: trust the model's call to stop — no gate, no early-give-up
-            # rejection. The orchestrator's deadline is the only hard backstop.
-            ctx.finished = True
-            ctx.finish_summary = str(summary)
-            ctx.gave_up = bool(give_up)
-            return "challenge attempt finished."
-        # finish-gate (#12): if submit said flags still remain, force ONE final
-        # harvest/verify pass before we let the agent stop (kills "died one step
-        # short" / missed multi-flag losses).
-        remaining = (ctx.last_submit or {}).get("remaining")
-        if (not ctx.gate_checked and not give_up and remaining
-                and int(remaining) > 0):
-            ctx.gate_checked = True
-            return ("FINISH GATE: submit reported " + str(remaining) + " flag(s) "
-                    "still REMAIN on this challenge. Before finishing, do a final "
-                    "sweep: `grep -rEo 'flag\\{[^}]+\\}' /challenge /flag /app "
-                    "/var/www /tmp 2>/dev/null`, check `env` and other "
-                    "routes/roles/params, and submit_flag any suspects. Then call "
+        # light give-up gate: an agent that neither worked the target nor
+        # recorded anything new learned nothing. Reject give-ups that are
+        # BOTH under 8 minutes AND have <2 recorded facts; any finish backed
+        # by findings/notes, or on budget, is honored. A bare finish() with
+        # NO submits and NO intel is a give-up in disguise — gate it
+        # identically (else the model sidesteps via finish(give_up=False)
+        # after learning nothing).
+        intel = sum(1 for e in ctx.notes.entries
+                    if e.get("kind") in ("fact", "failure"))
+        premature = give_up or (ctx.last_submit is None and intel < 2)
+        if (premature and time.time() - ctx.start_ts < 480
+                and intel < 2):
+            return ("finish REJECTED: under 8 minutes elapsed "
+                    "with fewer than 2 new facts recorded. Out of ideas? "
+                    "FIRST read the other models' NOTES_*.md files — a "
+                    "divergent sibling result is a new lead, not a "
+                    "dead end. If you truly exhausted this angle, "
+                    "notes(kind='fact' or 'failure') WHAT you ruled out "
+                    "and why. Otherwise keep attacking — try a different "
+                    "tool, parameter, role, or attack class. Then call "
                     "finish again.")
-        # run-6661 c-04 lesson: giving up at 5.6min with zero facts on a
-        # still-booting target burned the attempt AND locked the retry gate
-        # (no progress recorded). Block early give-ups that learned nothing;
-        # a finish backed by facts or submits is always honored.
-        if give_up and time.time() - ctx.start_ts < 300 \
-                and ctx.notes.facts_count() == 0 and ctx.last_submit is None:
-            return ("finish(give_up) REJECTED: under 5 minutes elapsed with no "
-                    "facts and no submits recorded. The target may still be "
-                    "booting (slow services need 30-90s) — re-probe with "
-                    "curl/TCP, and record what you learned as notes(kind=fact "
-                    "or failure) before giving up.")
         ctx.finished = True
         ctx.finish_summary = str(summary)
         ctx.gave_up = bool(give_up)
-        return "challenge attempt finished."
+        return "pentest of this target finished."
 
-    return {"bash": t_bash, "port_scan": t_port_scan, "r2_analyze": t_r2_analyze,
+    return {"bash": t_bash, "bash_status": t_bash_status, "bash_kill": t_bash_kill,
+            "port_scan": t_port_scan, "r2_analyze": t_r2_analyze,
             "http_request": t_http, "read_file": t_read, "write_file": t_write,
             "list_dir": t_list, "grep": t_grep, "notes": t_notes,
             "submit_flag": t_submit, "finish": t_finish}

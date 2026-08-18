@@ -20,28 +20,25 @@ def _pentest_llms(cfg):
     Lineup = flash + pro (shares the deepseek key) + glm + qwen (whichever keys
     are present). Single-model callers get `llm`; deep mode spawns one coding
     agent per lineup entry."""
-    llm = LLMClient(providers_from_config(cfg), Budget(cfg.token_soft_limit),
-                    gateway=cfg.model_gateway)
+    llm = LLMClient(providers_from_config(cfg), Budget(cfg.token_soft_limit))
     llm_glm = None
     lineup = [(llm, 'flash')]
-    if cfg.deepseek_api_key and cfg.deepseek_pro_model and not cfg.mock_llm:
+    if cfg.deepseek_api_key and cfg.deepseek_pro_model:
         from .llm.registry import Provider
         pro = Provider('deepseek-pro', cfg.deepseek_base_url,
                        cfg.deepseek_api_key, cfg.deepseek_pro_model,
                        cfg.deepseek_model)
-        lineup.append((LLMClient([pro], Budget(cfg.token_soft_limit),
-                                  gateway=cfg.model_gateway), 'pro'))
-    if cfg.glm_api_key and not (cfg.mock_llm or cfg.model_gateway):
+        lineup.append((LLMClient([pro], Budget(cfg.token_soft_limit)), 'pro'))
+    if cfg.glm_api_key:
         from .llm.anthropic_client import AnthropicGLMClient
         llm_glm = AnthropicGLMClient(cfg.glm_api_key, model=cfg.glm_model,
                                      budget=llm.budget)
         lineup.append((llm_glm, 'glm'))
-    if cfg.aliyun_api_key and cfg.qwen_model and not cfg.mock_llm:
+    if cfg.aliyun_api_key and cfg.qwen_model:
         from .llm.registry import Provider
         qwen = Provider('qwen', cfg.aliyun_base_url, cfg.aliyun_api_key,
                         cfg.qwen_model, cfg.qwen_compact_model)
-        lineup.append((LLMClient([qwen], Budget(cfg.token_soft_limit),
-                                  gateway=cfg.model_gateway), 'qwen'))
+        lineup.append((LLMClient([qwen], Budget(cfg.token_soft_limit)), 'qwen'))
     # arbitrary extra models — any OpenAI-compatible endpoint (domestic or not):
     # HEHUA_MODELS="kimi|https://api.moonshot.cn/v1|sk-xx|kimi-k3,hunyuan|https://api.hunyuan.cloud.tencent.com/v1|key|hunyuan-turbo"
     for spec in (os.getenv('HEHUA_MODELS', '').split(',') if os.getenv('HEHUA_MODELS') else []):
@@ -54,8 +51,7 @@ def _pentest_llms(cfg):
             continue
         name, base, key, model_id = parts[0], parts[1], parts[2], parts[3]
         prov = Provider(name, base, key, model_id)
-        lineup.append((LLMClient([prov], Budget(cfg.token_soft_limit),
-                                  gateway=cfg.model_gateway), name))
+        lineup.append((LLMClient([prov], Budget(cfg.token_soft_limit)), name))
     return llm, llm_glm, lineup
 
 
