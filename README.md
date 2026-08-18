@@ -15,11 +15,16 @@
   挖出 32 类漏洞含 2 条 RCE 链与全库数据；6 分钟快测亦产出完整数据包报告）
 - **对话式操作**：操作员 LLM 理解自然语言意图（渗透目标、调整侧重、追问结果），自动调度
 - **多模型并行**（deep 模式）：`flash / pro / glm / qwen` 各派一个 coding agent 同时打同一目标，
-  共享 NOTES.md 情报（stigmergy 协作），配置了哪些 key 就启用哪些模型
-- **连续工具循环引擎**：think → bash / HTTP / 文件操作 → 观察循环往复，附看门狗
-  （重复检测 / 无进展换向 / 预算强制收尾）与上下文滚动压缩，长程任务不崩
+  **每个模型分到不同攻击视角**（认证注入 / 盲注 / 业务逻辑 / 源码审计 / 杂项），各自持私有思考
+  笔记防互相锚定、共享侦察清单与命令台账，每 2 分钟定时交叉读取兄弟笔记（分歧=新线索）
+- **连续工具循环引擎**：think → bash / HTTP / 文件操作 → 观察循环往复；STEP 0 强制先写攻击
+  分析、STEP 1 强制 ~3 分钟侦察并落盘共享 RECON.md；题面指纹→漏洞类假设先行；⛔防重复
+  台账（机械提取已跑 ≥3 次的命令列为禁跑）；T-3 分钟收尾预警 + 预算耗尽排水轮（只允许
+  存档动作）；后台任务三件套（`background=true` / `bash_status` / `bash_kill`，无计时器长扫
+  描）+ INFRA.md 基础设施台账；会话结束按进程组收割全部残留进程（代理/隧道/扫描）；上下文
+  滚动压缩，长程任务不崩
 - **8 维领域 playbook**：Web / 多阶段内网 / 组件利用 / 二进制 / 云 / 对抗规避 / AI 应用 / 区块链，
-  按目标特征自动注入，附 payload 语料库
+  按目标描述+侦察证据自动路由注入，agent 运行中可自主换载其他 playbook；附 8 类 payload 语料库
 - **中文实时进度**：每个动作带模型名流式输出（`[glm] bash: ...`、`★ [glm] 发现漏洞: ...`），
   每 45 秒一条进度汇总（已报告漏洞数 + 各模型当前在测什么）
 - **标准渗透测试报告**：测完自动生成 `out/<目标>/report.md` —— 风险汇总矩阵、
@@ -105,8 +110,11 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 | `kimi` | `Kimi_API_KEY` | Kimi3） |
 | 其它LLM |
 
-每个模型一个独立 coding agent，同一目标各自连续攻击、通过 NOTES.md 共享事实与死路，
-任一 agent 拿到证明即汇总。未配置的模型自动跳过；只想单模型跑就不开 deep。
+每个模型一个独立 coding agent，各自分到**不同攻击视角**（互不重复侦察）；私有笔记
+`NOTES_<模型>.md` 独立思考防锚定，共享层 `RECON.md`（侦察清单，追加制）/ `TRANSCRIPT.md`
+（全量命令日志）/ `INFRA.md`（后台任务台账）/ `scripts/` 协同复用，每 2 分钟定时交叉同步；
+会话结束各写 `HANDOFF_<模型>.md` 手写交接 + `SUMMARY_<模型>.md` 自动摘要。未配置的模型
+自动跳过；只想单模型跑就不开 deep。
 
 ## 配置
 
@@ -116,9 +124,10 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 |---|---|
 | `DEEPSEEK_API_KEY` | 主 LLM（OpenAI 兼容；也支持 qwen / glm / kimi 作主模型） |
 | `DEEPSEEK_MODEL` | 主模型 id（默认 `deepseek-chat`） |
-| `DEEPSEEK_PRO_MODEL` | deep 模式第 2 solver（默认 `deepseek-reasoner`） |
-| `GLM_API_KEY` + `GLM_MODEL` | 可选，GLM 强模型（默认 `glm-5.2`） |
+| `DEEPSEEK_PRO_MODEL` | deep 模式第 2 solver（默认 `deepseek-v4-pro`） |
+| `GLM_API_KEY` + `GLM_MODEL` | 可选，GLM 强模型（默认 `glm-5.3`） |
 | `ALIYUN_API_KEY` (+ `ALIYUN_BASE_URL` / `QWEN_MODEL`) | 可选，DashScope 千问端点 |
+| `HEHUA_MODELS` | 可选，任意 OpenAI 兼容端点接入编成：`name\|base_url\|key\|model_id` 逗号分隔 |
 | `HEHUA_DEEP` | `deep` 开启多模型并行；默认单模型 |
 | `HEHUA_PEERS` | deep 模式并行 agent 上限（默认 2，最大 = 模型数） |
 | `HEHUA_PENTEST_BUDGET` | 单目标默认预算（分钟，默认 30） |
@@ -131,7 +140,8 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 4. **内网多阶段**：立足点 → socat/chisel 隧道 → 内网测绘 → 主题化密码攻击（品牌词×年份组合）
    → 凭证复用 → 提权（SUID/cron/capabilities）→ 横向移动
 5. **报告**：渗透结束自动生成标准测试报告 `out/<目标>/report.md`（风险矩阵 + 每漏洞的利用过程/
-   完整 HTTP 数据包/响应证据/影响/修复建议），附 `TRANSCRIPT.md` 原始命令日志与 `NOTES.md` 情报笔记
+   完整 HTTP 数据包/响应证据/影响/修复建议），附 `TRANSCRIPT.md` 原始命令日志与各模型
+   `NOTES_*.md` 情报笔记 / `HANDOFF_*.md` 交接
 6. **对话**：操作员 LLM 理解自然语言，可追问发现、调整策略、闲聊技术问题
 
 ## 8 维渗透知识库（`hehua/prompts/`）
@@ -140,13 +150,13 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 
 | Playbook | 覆盖 |
 |---|---|
-| `playbook_web` | SQLi 提取兜底梯子 / SSTI / 命令注入 / SSRF / LFI / 上传 / 反序列化 / 越权 / JWT / 请求走私 / JS chunk 分析 / 指纹直打 CVE |
+| `playbook_web` | SQLi 提取兜底梯子 / SSTI / 命令注入 / SSRF / LFI / 上传 / 反序列化 / 越权 / JWT / 请求走私 / JS chunk 分析 / 指纹直打 CVE / WAF-SQLi 变形矩阵 / 多租户越权 / GraphQL / LDAP / 原型污染 / 缓存投毒 / OAuth 攻击 / HTTP 方法篡夺 / WebSocket 攻击面 |
 | `playbook_killchain` | 多阶段内网：弱口令 → RCE → 提权 → 隧道 → 横向；**密码攻击标准流程**（socat 桥 + 主题化字典 + 凭证横向复用） |
-| `playbook_exploit` | 已知组件 CVE（nuclei 优先）+ PoC 清单（`poc_inventory.md` 收录 Weaver/Confluence/Shiro/Weblogic…） |
-| `playbook_binary` | 逆向 / pwn / ROP / 自研 VM 解释器还原 |
+| `playbook_exploit` | 已知组件 CVE（nuclei 优先）+ 2025-26 热 CVE 速查表 + PoC 清单（`poc_inventory.md` 收录 Weaver/Confluence/Shiro/Weblogic…） |
+| `playbook_binary` | 逆向 / pwn / ROP / 自研 VM 解释器还原 / 移动端协议复现 / Android 逆向（jadx+androguard） |
 | `playbook_cloud` | 云元数据 / k8s / 容器逃逸 |
 | `playbook_evasion` | WAF 绕过 / 编码变形 / payload 混淆 |
-| `playbook_ai` | LLM 应用渗透：系统提示泄露 / 提示注入 / Agent 工具滥用 / 沙箱逃逸 + Web 侧攻击面 |
+| `playbook_ai` | LLM 应用渗透：系统提示泄露 / 提示注入 / Agent 工具滥用 / 沙箱逃逸 / 文档导入 SSRF / MCP 工具投毒 + Web 侧攻击面 |
 | `playbook_blockchain` | 智能合约审计：访问控制 / 重入 / 溢出 + foundry/solc/slither 工作流 |
 
 `tools/payloads/` 内置注入 / XSS / AI 提示注入等 payload 语料，agent 运行时直接取用。
@@ -156,14 +166,18 @@ python -m hehua pentest http://10.0.0.5 --instruction "重点测越权和JWT"
 ```
 python -m hehua
   └─ operator.py    对话操作员（意图理解 / 调度 / 结果问答）
-       └─ pentest.py   单目标 / CIDR 网段调度，多模型 fan-out
-            └─ core/coding_agent.py   连续工具循环（每模型一个实例）
-                 ├─ core/tools.py     bash / http_request / 文件 / grep / notes / submit_flag / finish
-                 ├─ core/sandbox.py   命令执行隔离（超时 kill / 输出落盘）
+       └─ pentest.py   单目标 / CIDR 网段调度，多模型 fan-out（视角分工 / 进程组收割）
+            └─ core/coding_agent.py   连续工具循环（每模型一个实例，STEP 0/1 强制开局
+            │    分析与侦察、2min 兄弟同步、防重复台账、T-3min 收尾 + 排水轮）
+                 ├─ core/tools.py     bash(+后台三件套) / http_request / 文件 / grep /
+                 │                    notes / submit_flag(报漏洞) / finish(带放弃门)
+                 ├─ core/sandbox.py   命令执行隔离（超时 kill / 输出落盘 / 进程组追踪收割）
                  ├─ core/context.py   token 估算 + 滚动压缩
-                 └─ NOTES.md          多 agent 共享情报（锁保护）
+                 └─ 工作区文件记忆    NOTES_<模型>.md 私有思考 / RECON.md 共享侦察 /
+                                      TRANSCRIPT.md 命令日志 / INFRA.md 后台任务台账 /
+                                      HANDOFF_<模型>.md 交接 / SUMMARY_<模型>.md 摘要
   llm/    多 provider 客户端（OpenAI 兼容 + Anthropic-GLM）+ 预算统计
-  prompts/  系统提示 + 8 维 playbook + PoC 清单
+  prompts/  系统提示 + 8 维 playbook（运行中可自主换载）+ PoC 清单
 ```
 
 ## 目录

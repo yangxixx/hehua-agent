@@ -1,6 +1,6 @@
 [project]
 name = "hehua"
-version = "0.1.0"
+version = "0.2.0"
 description = "Autonomous offensive-security agent: point at a target, it pentests."
 requires-python = ">=3.10"
 dependencies = [
